@@ -255,7 +255,7 @@ def mostrar_estadisticas():
 
 # --- INTERFAZ DE USUARIO ---
 def mostrar_interfaz_ventas():
-    """Interfaz principal para el proceso de ventas"""
+    """Interfaz principal para el proceso de ventas con búsqueda mejorada"""
     st.header("🛒 Punto de Venta")
     
     # --- Barra de búsqueda ---
@@ -273,17 +273,17 @@ def mostrar_interfaz_ventas():
                     resultados.append({
                         "Producto": producto,
                         "Categoría": categoria,
-                        "Precio": f"${datos['precio']}",
+                        "Precio": f"${datos['precio']:.2f}",
                         "Stock": datos['stock']
                     })
         
         if resultados:
-            # Mostrar máximo 5 resultados a la vez para no saturar
-            st.write(f"📝 Resultados para: '{busqueda}'")
+            # Mostrar resultados en grupos de 6
+            st.write(f"📝 {len(resultados)} resultado(s) para: '{busqueda}'")
             
             # Dividir resultados en columnas para mejor presentación
             cols = st.columns(2)
-            for i, producto_info in enumerate(resultados[:6]):  # Mostrar hasta 6 resultados
+            for i, producto_info in enumerate(resultados[:6]):  # Mostrar hasta 6 resultados iniciales
                 with cols[i % 2]:
                     with st.container(border=True):
                         st.markdown(f"**{producto_info['Producto']}**")
@@ -294,32 +294,62 @@ def mostrar_interfaz_ventas():
                         # Botón para agregar directamente
                         if st.button(f"Agregar {producto_info['Producto']}",
                                     key=f"add_{producto_info['Producto']}"):
-                            if producto_info['Producto'] in st.session_state.carrito:
-                                st.session_state.carrito[producto_info['Producto']]['cantidad'] += 1
+                            if producto_info['Stock'] > 0:
+                                if producto_info['Producto'] in st.session_state.carrito:
+                                    st.session_state.carrito[producto_info['Producto']]['cantidad'] += 1
+                                else:
+                                    st.session_state.carrito[producto_info['Producto']] = {
+                                        'cantidad': 1,
+                                        'precio': float(producto_info['Precio'].replace('$', '')),
+                                        'categoria': producto_info['Categoría'],
+                                        'subtotal': float(producto_info['Precio'].replace('$', ''))
+                                    }
+                                st.success(f"✔ {producto_info['Producto']} agregado!")
+                                st.rerun()
                             else:
-                                st.session_state.carrito[producto_info['Producto']] = {
-                                    'cantidad': 1,
-                                    'precio': st.session_state.inventario[producto_info['Categoría']][producto_info['Producto']]['precio'],
-                                    'categoria': producto_info['Categoría'],
-                                    'subtotal': st.session_state.inventario[producto_info['Categoría']][producto_info['Producto']]['precio']
-                                }
-                            st.success(f"✔ {producto_info['Producto']} agregado!")
-                            st.rerun()
+                                st.error("No hay stock disponible")
             
             if len(resultados) > 6:
-                st.info(f"Mostrando 6 de {len(resultados)} resultados. Refina tu búsqueda.")
+                with st.expander(f"Ver más resultados ({len(resultados)-6} restantes)"):
+                    cols_extra = st.columns(2)
+                    for i, producto_info in enumerate(resultados[6:]):
+                        with cols_extra[i % 2]:
+                            with st.container(border=True):
+                                st.markdown(f"**{producto_info['Producto']}**")
+                                st.caption(f"Categoría: {producto_info['Categoría']}")
+                                st.write(f"Precio: {producto_info['Precio']}")
+                                st.write(f"Stock: {producto_info['Stock']}")
+                                
+                                if st.button(f"Agregar {producto_info['Producto']}",
+                                            key=f"add_extra_{producto_info['Producto']}"):
+                                    if producto_info['Stock'] > 0:
+                                        if producto_info['Producto'] in st.session_state.carrito:
+                                            st.session_state.carrito[producto_info['Producto']]['cantidad'] += 1
+                                        else:
+                                            st.session_state.carrito[producto_info['Producto']] = {
+                                                'cantidad': 1,
+                                                'precio': float(producto_info['Precio'].replace('$', '')),
+                                                'categoria': producto_info['Categoría'],
+                                                'subtotal': float(producto_info['Precio'].replace('$', ''))
+                                            }
+                                        st.success(f"✔ {producto_info['Producto']} agregado!")
+                                        st.rerun()
+                                    else:
+                                        st.error("No hay stock disponible")
         else:
             st.warning("No se encontraron productos con ese nombre")
     else:
         # Mostrar todas las categorías si no hay búsqueda
         for categoria, productos in st.session_state.inventario.items():
-            with st.expander(f"📁 {categoria}"):
+            with st.expander(f"📁 {categoria} ({len(productos)} productos)"):
                 for producto, datos in productos.items():
-                    col1, col2 = st.columns([3, 1])
+                    col1, col2 = st.columns([4, 1])
                     with col1:
-                        st.write(f"**{producto}** - ${datos['precio']} (Stock: {datos['stock']})")
+                        st.write(f"**{producto}** - ${datos['precio']:.2f} (Stock: {datos['stock']})")
                     with col2:
-                        if st.button(f"➕", key=f"add_{producto}"):
+                        if st.button(f"➕", 
+                                   key=f"add_{producto}",
+                                   disabled=datos['stock'] <= 0):
                             if producto in st.session_state.carrito:
                                 st.session_state.carrito[producto]['cantidad'] += 1
                             else:
@@ -331,6 +361,8 @@ def mostrar_interfaz_ventas():
                                 }
                             st.success(f"✔ {producto} agregado!")
                             st.rerun()
+                        if datos['stock'] <= 0:
+                            st.error("Sin stock")
 def mostrar_carrito():
     """Muestra el carrito de compras actual con opciones de edición"""
     st.sidebar.header("📋 Factura Actual")
