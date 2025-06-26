@@ -204,85 +204,79 @@ def mostrar_interfaz_ventas():
     """Interfaz principal para el proceso de ventas"""
     st.header("🛒 Punto de Venta")
     
-    # --- Barra de búsqueda y selección ---
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        busqueda = st.text_input("🔍 Buscar producto por nombre:", "", key="busqueda_producto")
-    with col2:
-        categoria_seleccionada = st.selectbox(
-            "Categoría:", 
-            ["Todas"] + list(st.session_state.inventario.keys()),
-            key="select_categoria"
-        )
+    # --- Barra de búsqueda ---
+    busqueda = st.text_input("🔍 Buscar producto por nombre:", "", 
+                           key="busqueda_producto",
+                           placeholder="Escribe para buscar productos...")
     
-    # --- Resultados de búsqueda ---
-    if busqueda or categoria_seleccionada != "Todas":
+    # --- Resultados de búsqueda en tiempo real ---
+    if busqueda:
+        # Buscar productos que coincidan (sin distinguir mayúsculas/minúsculas)
         resultados = []
         for categoria, productos in st.session_state.inventario.items():
-            if categoria_seleccionada == "Todas" or categoria == categoria_seleccionada:
-                for producto, datos in productos.items():
-                    if busqueda.lower() in producto.lower():
-                        resultados.append({
-                            "Categoría": categoria,
-                            "Producto": producto,
-                            "Precio": f"${datos['precio']}",
-                            "Stock": datos['stock'],
-                            "Seleccionar": False  # Columna para checkboxes
-                        })
+            for producto, datos in productos.items():
+                if busqueda.lower() in producto.lower():
+                    resultados.append({
+                        "Producto": producto,
+                        "Categoría": categoria,
+                        "Precio": f"${datos['precio']}",
+                        "Stock": datos['stock']
+                    })
         
         if resultados:
-            df_resultados = pd.DataFrame(resultados)
+            # Mostrar máximo 5 resultados a la vez para no saturar
+            st.write(f"📝 Resultados para: '{busqueda}'")
             
-            # Crear columnas editables
-            edited_df = st.data_editor(
-                df_resultados,
-                column_config={
-                    "Seleccionar": st.column_config.CheckboxColumn(
-                        "Agregar",
-                        default=False,
-                        required=True
-                    )
-                },
-                hide_index=True,
-                use_container_width=True,
-                key="editor_productos"
-            )
-            
-            # Procesar selección
-            if st.button("➕ Agregar seleccionados", key="agregar_productos"):
-                productos_agregados = 0
-                for idx, row in edited_df.iterrows():
-                    if row["Seleccionar"]:
-                        producto = row["Producto"]
-                        categoria = row["Categoría"]
-                        cantidad = 1  # Cantidad inicial
+            # Dividir resultados en columnas para mejor presentación
+            cols = st.columns(2)
+            for i, producto_info in enumerate(resultados[:6]):  # Mostrar hasta 6 resultados
+                with cols[i % 2]:
+                    with st.container(border=True):
+                        st.markdown(f"**{producto_info['Producto']}**")
+                        st.caption(f"Categoría: {producto_info['Categoría']}")
+                        st.write(f"Precio: {producto_info['Precio']}")
+                        st.write(f"Stock: {producto_info['Stock']}")
                         
-                        # Verificar si el producto ya está en el carrito
-                        if producto in st.session_state.carrito:
-                            st.session_state.carrito[producto]["cantidad"] += cantidad
-                            st.session_state.carrito[producto]["subtotal"] = (
-                                st.session_state.carrito[producto]["cantidad"] * 
-                                st.session_state.carrito[producto]["precio"]
-                            )
-                        else:
-                            st.session_state.carrito[producto] = {
-                                "cantidad": cantidad,
-                                "precio": st.session_state.inventario[categoria][producto]["precio"],
-                                "categoria": categoria,
-                                "subtotal": cantidad * st.session_state.inventario[categoria][producto]["precio"]
-                            }
-                        productos_agregados += 1
-                
-                if productos_agregados > 0:
-                    st.success(f"✔ {productos_agregados} producto(s) agregado(s) al carrito")
-                    st.rerun()
-                else:
-                    st.warning("No has seleccionado ningún producto")
+                        # Botón para agregar directamente
+                        if st.button(f"Agregar {producto_info['Producto']}",
+                                    key=f"add_{producto_info['Producto']}"):
+                            if producto_info['Producto'] in st.session_state.carrito:
+                                st.session_state.carrito[producto_info['Producto']]['cantidad'] += 1
+                            else:
+                                st.session_state.carrito[producto_info['Producto']] = {
+                                    'cantidad': 1,
+                                    'precio': st.session_state.inventario[producto_info['Categoría']][producto_info['Producto']]['precio'],
+                                    'categoria': producto_info['Categoría'],
+                                    'subtotal': st.session_state.inventario[producto_info['Categoría']][producto_info['Producto']]['precio']
+                                }
+                            st.success(f"✔ {producto_info['Producto']} agregado!")
+                            st.rerun()
+            
+            if len(resultados) > 6:
+                st.info(f"Mostrando 6 de {len(resultados)} resultados. Refina tu búsqueda.")
         else:
-            st.warning("No se encontraron productos con esos criterios")
+            st.warning("No se encontraron productos con ese nombre")
     else:
-        st.info("Ingrese un término de búsqueda o seleccione una categoría")
-
+        # Mostrar todas las categorías si no hay búsqueda
+        for categoria, productos in st.session_state.inventario.items():
+            with st.expander(f"📁 {categoria}"):
+                for producto, datos in productos.items():
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.write(f"**{producto}** - ${datos['precio']} (Stock: {datos['stock']})")
+                    with col2:
+                        if st.button(f"➕", key=f"add_{producto}"):
+                            if producto in st.session_state.carrito:
+                                st.session_state.carrito[producto]['cantidad'] += 1
+                            else:
+                                st.session_state.carrito[producto] = {
+                                    'cantidad': 1,
+                                    'precio': datos['precio'],
+                                    'categoria': categoria,
+                                    'subtotal': datos['precio']
+                                }
+                            st.success(f"✔ {producto} agregado!")
+                            st.rerun()
 def mostrar_carrito():
     """Muestra el carrito de compras actual con opciones de edición"""
     st.sidebar.header("📋 Factura Actual")
