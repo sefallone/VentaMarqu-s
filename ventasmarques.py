@@ -3,8 +3,9 @@ import pandas as pd
 import datetime
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import plotly.express as px
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
 
 # Configuración inicial de la página
 st.set_page_config(
@@ -522,13 +523,162 @@ def mostrar_historial_ventas():
         mime="text/csv"
     )
 
-# --- APLICACIÓN PRINCIPAL ---
+def generar_reporte_diario():
+    """Genera un reporte PDF con el cierre diario"""
+    # Filtrar ventas del día actual
+    hoy = datetime.date.today()
+    ventas_hoy = [v for v in st.session_state.ventas if v['fecha'].date() == hoy]
+    
+    if not ventas_hoy:
+        st.warning("No hay ventas registradas hoy")
+        return None
+    
+    # Preparar datos para los reportes
+    reporte_metodos = pd.DataFrame(ventas_hoy).groupby('metodo_pago')['total'].agg(['sum', 'count']).reset_index()
+    reporte_metodos.columns = ['Método de Pago', 'Total Vendido', 'N° Transacciones']
+    
+    # Reporte por producto
+    productos_vendidos = []
+    for venta in ventas_hoy:
+        for producto, datos in venta['productos'].items():
+            productos_vendidos.append({
+                'Producto': producto,
+                'Categoría': datos['categoria'],
+                'Cantidad': datos['cantidad'],
+                'Total': datos['subtotal']
+            })
+    
+    reporte_productos = pd.DataFrame(productos_vendidos).groupby(['Producto', 'Categoría']).agg({'Cantidad': 'sum', 'Total': 'sum'}).reset_index()
+    
+    # Crear PDF
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Título
+    story.append(Paragraph(f"Reporte Diario - {hoy.strftime('%d/%m/%Y')}", styles['Title']))
+    story.append(Spacer(1, 12))
+    
+    # 1. Reporte por Método de Pago
+    story.append(Paragraph("1. Resumen por Método de Pago", styles['Heading2']))
+    
+    # Convertir DataFrame a lista para ReportLab
+    data_metodos = [reporte_metodos.columns.tolist()] + reporte_metodos.values.tolist()
+    
+    # Crear tabla
+    t_metodos = Table(data_metodos)
+    t_metodos.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(t_metodos)
+    story.append(Spacer(1, 24))
+    
+    # 2. Reporte por Producto
+    story.append(Paragraph("2. Ventas por Producto", styles['Heading2']))
+    
+    data_productos = [reporte_productos.columns.tolist()] + reporte_productos.values.tolist()
+    
+    t_productos = Table(data_productos)
+    t_productos.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(t_productos)
+    story.append(Spacer(1, 24))
+    
+    # Totales
+    total_dia = reporte_metodos['Total Vendido'].sum()
+    story.append(Paragraph(f"Total General del Día: ${total_dia:.2f}", styles['Heading2']))
+    
+    # Generar PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def mostrar_reportes_diarios():
+    """Interfaz para generar y mostrar reportes diarios"""
+    st.header("📊 Reportes Diarios")
+    
+    # Filtrar ventas del día actual
+    hoy = datetime.date.today()
+    ventas_hoy = [v for v in st.session_state.ventas if v['fecha'].date() == hoy]
+    
+    if not ventas_hoy:
+        st.warning("No hay ventas registradas hoy")
+        return
+    
+    # 1. Reporte por Método de Pago
+    st.subheader("1. Resumen por Método de Pago")
+    reporte_metodos = pd.DataFrame(ventas_hoy).groupby('metodo_pago')['total'].agg(['sum', 'count']).reset_index()
+    reporte_metodos.columns = ['Método de Pago', 'Total Vendido', 'N° Transacciones']
+    st.dataframe(
+        reporte_metodos,
+        column_config={
+            "Total Vendido": st.column_config.NumberColumn(format="$%.2f")
+        },
+        hide_index=True
+    )
+    
+    # Gráfico de métodos de pago
+    st.bar_chart(reporte_metodos.set_index('Método de Pago')['Total Vendido'])
+    
+    # 2. Reporte por Producto
+    st.subheader("2. Ventas por Producto")
+    productos_vendidos = []
+    for venta in ventas_hoy:
+        for producto, datos in venta['productos'].items():
+            productos_vendidos.append({
+                'Producto': producto,
+                'Categoría': datos['categoria'],
+                'Cantidad': datos['cantidad'],
+                'Total': datos['subtotal']
+            })
+    
+    reporte_productos = pd.DataFrame(productos_vendidos).groupby(['Producto', 'Categoría']).agg({'Cantidad': 'sum', 'Total': 'sum'}).reset_index()
+    st.dataframe(
+        reporte_productos,
+        column_config={
+            "Total": st.column_config.NumberColumn(format="$%.2f")
+        },
+        hide_index=True
+    )
+    
+    # Gráfico de productos más vendidos
+    st.subheader("Productos Más Vendidos (Cantidad)")
+    top_productos = reporte_productos.sort_values('Cantidad', ascending=False).head(10)
+    st.bar_chart(top_productos.set_index('Producto')['Cantidad'])
+    
+    # Botón para generar PDF
+    if st.button("📄 Generar Reporte PDF"):
+        pdf = generar_reporte_diario()
+        if pdf:
+            st.success("Reporte generado correctamente!")
+            st.download_button(
+                label="⬇️ Descargar Reporte Completo",
+                data=pdf,
+                file_name=f"reporte_diario_{hoy.strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
+
+# Actualizar la función main para incluir el nuevo menú
 def main():
     # Menú de navegación
     st.sidebar.title("SweetBakery POS")
     opcion = st.sidebar.radio(
         "Menú Principal",
-        ["Punto de Venta", "Gestión de Inventario", "Historial de Ventas", "Estadísticas"]
+        ["Punto de Venta", "Gestión de Inventario", "Historial de Ventas", "Estadísticas", "Reportes Diarios"]
     )
     
     # Mostrar sección según selección
@@ -541,6 +691,8 @@ def main():
         mostrar_historial_ventas()
     elif opcion == "Estadísticas":
         mostrar_estadisticas()
+    elif opcion == "Reportes Diarios":
+        mostrar_reportes_diarios()
 
 if __name__ == "__main__":
     main()
