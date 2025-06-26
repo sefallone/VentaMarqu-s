@@ -344,44 +344,9 @@ def mostrar_carrito():
             if finalizar_venta(cliente, metodo_pago):
                 st.sidebar.success("Venta registrada correctamente!")
                 st.session_state.carrito = {}
-                st.rerun()def mostrar_carrito():
-    """Muestra el carrito de compras actual"""
-    st.sidebar.header("📋 Carrito de Compras")
-    
-    if not st.session_state.carrito:
-        st.sidebar.info("El carrito está vacío")
-        return
-    
-    total = 0
-    for producto, item in st.session_state.carrito.items():
-        st.sidebar.markdown(f"""
-        **{producto}**  
-        {item['cantidad']} x ${item['precio']} = **${item['subtotal']}**
-        """)
-        total += item['subtotal']
-    
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"### Total a Pagar: ${total}")
-    
-    # Información del cliente
-    cliente = st.sidebar.text_input("Nombre del cliente:", "Consumidor Final")
-    metodo_pago = st.sidebar.selectbox(
-        "Método de pago:", 
-        ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"]
-    )
-    
-    if st.sidebar.button("✅ Finalizar Venta", type="primary", use_container_width=True):
-        venta = finalizar_venta(cliente, metodo_pago)
-        if venta:
-            factura_pdf = generar_factura(venta)
-            st.sidebar.download_button(
-                label="⬇️ Descargar Factura",
-                data=factura_pdf,
-                file_name=f"factura_{venta['fecha'].strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-
+                st.rerun()
+                
+                
 def mostrar_inventario():
     """Muestra y permite gestionar el inventario"""
     st.header("📦 Gestión de Inventario")
