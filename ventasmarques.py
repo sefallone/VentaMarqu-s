@@ -207,11 +207,13 @@ def mostrar_interfaz_ventas():
     # --- Barra de búsqueda y selección ---
     col1, col2 = st.columns([4, 1])
     with col1:
-        busqueda = st.text_input("🔍 Buscar producto por nombre:", "")
+        busqueda = st.text_input("🔍 Buscar producto por nombre:", "", key="busqueda_producto")
     with col2:
         categoria_seleccionada = st.selectbox(
             "Categoría:", 
-            ["Todas"] + list(st.session_state.inventario.keys())
+            ["Todas"] + list(st.session_state.inventario.keys()),
+            key="select_categoria"
+        )
     
     # --- Resultados de búsqueda ---
     if busqueda or categoria_seleccionada != "Todas":
@@ -224,30 +226,58 @@ def mostrar_interfaz_ventas():
                             "Categoría": categoria,
                             "Producto": producto,
                             "Precio": f"${datos['precio']}",
-                            "Stock": datos['stock']
+                            "Stock": datos['stock'],
+                            "Seleccionar": False  # Columna para checkboxes
                         })
         
         if resultados:
             df_resultados = pd.DataFrame(resultados)
-            seleccionados = st.data_editor(
+            
+            # Crear columnas editables
+            edited_df = st.data_editor(
                 df_resultados,
                 column_config={
-                    "Seleccionar": st.column_config.CheckboxColumn(required=True)
+                    "Seleccionar": st.column_config.CheckboxColumn(
+                        "Agregar",
+                        default=False,
+                        required=True
+                    )
                 },
                 hide_index=True,
-                use_container_width=True
+                use_container_width=True,
+                key="editor_productos"
             )
             
-            # Botón para agregar productos seleccionados
-            if st.button("➕ Agregar a Factura"):
-                for idx, row in seleccionados.iterrows():
-                    if row.get("Seleccionar", False):
+            # Procesar selección
+            if st.button("➕ Agregar seleccionados", key="agregar_productos"):
+                productos_agregados = 0
+                for idx, row in edited_df.iterrows():
+                    if row["Seleccionar"]:
                         producto = row["Producto"]
                         categoria = row["Categoría"]
-                        cantidad = 1  # Puedes hacer esto editable si lo prefieres
+                        cantidad = 1  # Cantidad inicial
                         
-                        agregar_al_carrito(producto, cantidad, categoria)
-                        st.success(f"✔ {cantidad} x {producto} agregado al carrito")
+                        # Verificar si el producto ya está en el carrito
+                        if producto in st.session_state.carrito:
+                            st.session_state.carrito[producto]["cantidad"] += cantidad
+                            st.session_state.carrito[producto]["subtotal"] = (
+                                st.session_state.carrito[producto]["cantidad"] * 
+                                st.session_state.carrito[producto]["precio"]
+                            )
+                        else:
+                            st.session_state.carrito[producto] = {
+                                "cantidad": cantidad,
+                                "precio": st.session_state.inventario[categoria][producto]["precio"],
+                                "categoria": categoria,
+                                "subtotal": cantidad * st.session_state.inventario[categoria][producto]["precio"]
+                            }
+                        productos_agregados += 1
+                
+                if productos_agregados > 0:
+                    st.success(f"✔ {productos_agregados} producto(s) agregado(s) al carrito")
+                    st.rerun()
+                else:
+                    st.warning("No has seleccionado ningún producto")
         else:
             st.warning("No se encontraron productos con esos criterios")
     else:
@@ -262,27 +292,33 @@ def mostrar_carrito():
         return
     
     # Mostrar items con opción de eliminar
-    for producto, item in list(st.session_state.carrito.items()):
+    productos_a_eliminar = []
+    for producto, item in st.session_state.carrito.items():
         col1, col2, col3 = st.sidebar.columns([6, 3, 1])
         with col1:
             st.write(f"**{producto}**")
         with col2:
             nueva_cantidad = st.number_input(
-                f"Cantidad",
+                f"Cantidad {producto}",
                 min_value=1,
                 max_value=st.session_state.inventario[item['categoria']][producto]['stock'],
                 value=item['cantidad'],
-                key=f"edit_{producto}",
+                key=f"cant_{producto}",
                 label_visibility="collapsed"
             )
             if nueva_cantidad != item['cantidad']:
-                st.session_state.carrito[producto]['cantidad'] = nueva_cantidad
-                st.session_state.carrito[producto]['subtotal'] = nueva_cantidad * item['precio']
-                st.rerun()
+                item['cantidad'] = nueva_cantidad
+                item['subtotal'] = nueva_cantidad * item['precio']
         with col3:
             if st.button("❌", key=f"del_{producto}"):
-                del st.session_state.carrito[producto]
-                st.rerun()
+                productos_a_eliminar.append(producto)
+    
+    # Eliminar productos marcados
+    for producto in productos_a_eliminar:
+        del st.session_state.carrito[producto]
+    
+    if productos_a_eliminar:
+        st.rerun()
     
     # Resumen y total
     st.sidebar.markdown("---")
@@ -290,21 +326,25 @@ def mostrar_carrito():
     st.sidebar.markdown(f"### Total: ${total:.2f}")
     
     # Datos del cliente y pago
-    cliente = st.sidebar.text_input("👤 Nombre del cliente:", "Consumidor Final")
+    cliente = st.sidebar.text_input("👤 Nombre del cliente:", "Consumidor Final", key="nombre_cliente")
     metodo_pago = st.sidebar.selectbox(
         "💳 Método de pago:", 
-        ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"]
+        ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
+        key="metodo_pago"
     )
     
     # Botones de acción
-    if st.sidebar.button("🔄 Limpiar Carrito", type="secondary"):
-        st.session_state.carrito = {}
-        st.rerun()
-        
-    if st.sidebar.button("✅ Finalizar Venta", type="primary"):
-        if finalizar_venta(cliente, metodo_pago):
-            st.sidebar.success("Venta registrada correctamente!")
-def mostrar_carrito():
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("🔄 Limpiar", use_container_width=True):
+            st.session_state.carrito = {}
+            st.rerun()
+    with col2:
+        if st.button("✅ Finalizar", type="primary", use_container_width=True):
+            if finalizar_venta(cliente, metodo_pago):
+                st.sidebar.success("Venta registrada correctamente!")
+                st.session_state.carrito = {}
+                st.rerun()def mostrar_carrito():
     """Muestra el carrito de compras actual"""
     st.sidebar.header("📋 Carrito de Compras")
     
