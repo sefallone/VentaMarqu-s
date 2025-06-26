@@ -299,7 +299,7 @@ def mostrar_inventario():
                 "Precio": datos["precio"],
                 "Costo": datos["costo"],
                 "Stock": datos["stock"],
-                "Margen": f"{((datos['precio']-datos['costo'])/datos['costo']*100:.1f)}%"
+                "Margen": f"{((datos['precio']-datos['costo'])/datos['costo']*100):.1f}%"
             })
     
     st.dataframe(
