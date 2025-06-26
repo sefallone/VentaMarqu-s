@@ -8,7 +8,7 @@ import plotly.express as px
 
 # Configuración inicial de la página
 st.set_page_config(
-    page_title="SweetBakery POS", 
+    page_title="ARTE PARÍS POS", 
     page_icon="🍰", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -377,7 +377,7 @@ def mostrar_carrito():
     cliente = st.sidebar.text_input("👤 Nombre del cliente:", "Consumidor Final", key="nombre_cliente")
     metodo_pago = st.sidebar.selectbox(
         "💳 Método de pago:", 
-        ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
+        ["Efectivo Bs", "Efectivo $", "Tarjeta Débito", "Tarjeta Crédito", "Pago Móvil", "Zelle"],
         key="metodo_pago"
     )
     
