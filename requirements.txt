@@ -7,4 +7,3 @@ openpyxl
 seaborn
 plotly.express
 reportlab
-json
