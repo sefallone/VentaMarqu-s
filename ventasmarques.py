@@ -155,18 +155,22 @@ def actualizar_stock_seguro(categoria, producto, cantidad):
 
 # --- Interfaz Streamlit Mejorada ---
 def main():
-    st.set_page_config(page_title="SweetBakery POS", page_icon="🍰", layout="wide")
+    # Inicializar Firebase primero
+    if not initialize_firebase():
+        st.error("No se pudo conectar a Firebase. Verifica la configuración.")
+        st.stop()
     
-    # Inicialización segura de datos
-    if 'inventario' not in st.session_state:
-        firebase_data = get_firebase_data()
-        st.session_state.update({
-            "inventario": firebase_data["inventario"],
-            "ventas": firebase_data["ventas"],
-            "carrito": {},
-            "metodo_pago": "Efectivo",
-            "last_update": time.time()
-        })
+    # Obtener datos de Firebase con manejo de errores
+    try:
+        firebase_data = {
+            "inventario": db.reference('/inventario').get() or {},
+            "ventas": db.reference('/ventas').get() or []
+        }
+    except Exception as e:
+        st.error(f"Error obteniendo datos de Firebase: {str(e)}")
+        firebase_data = {"inventario": {}, "ventas": []}
+    
+
     
     # Actualización periódica segura (cada 30 segundos)
     if time.time() - st.session_state.last_update > 30:
