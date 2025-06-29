@@ -15,18 +15,14 @@ from reportlab.lib import colors
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # Obtener la clave privada correctamente formateada
+            # Obtener la clave privada directamente (ya está bien formateada)
             private_key = st.secrets["firebase"]["private_key"]
-            
-            # Asegurar que los saltos de línea sean interpretados correctamente
-            if isinstance(private_key, str):
-                private_key = private_key.replace('\\n', '\n')
             
             firebase_config = {
                 "type": st.secrets["firebase"]["type"],
                 "project_id": st.secrets["firebase"]["project_id"],
                 "private_key_id": st.secrets["firebase"]["private_key_id"],
-                "private_key": private_key,  # Ya corregido
+                "private_key": private_key,
                 "client_email": st.secrets["firebase"]["client_email"],
                 "client_id": st.secrets["firebase"]["client_id"],
                 "auth_uri": st.secrets["firebase"]["auth_uri"],
@@ -44,7 +40,6 @@ def initialize_firebase():
             st.error(f"Error inicializando Firebase: {str(e)}")
             return False
     return True
-
 if not initialize_firebase():
     st.stop()
 
