@@ -3,53 +3,43 @@ import firebase_admin
 from firebase_admin import credentials, db
 from datetime import datetime
 import pandas as pd
-import threading
+import time
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- Configuración Firebase ---
-if not firebase_admin._apps:
-    # Cargar credenciales desde secrets.toml
-    firebase_config = {
-        "type": st.secrets["firebase"]["type"],
-        "project_id": st.secrets["firebase"]["project_id"],
-        "private_key_id": st.secrets["firebase"]["private_key_id"],
-        "private_key": st.secrets["firebase"]["private_key"].replace('\\n', '\n'),
-        "client_email": st.secrets["firebase"]["client_email"],
-        "client_id": st.secrets["firebase"]["client_id"],
-        "auth_uri": st.secrets["firebase"]["auth_uri"],
-        "token_uri": st.secrets["firebase"]["token_uri"],
-        "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
-        "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"]
-    }
-    cred = credentials.Certificate(firebase_config)
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': st.secrets["firebase"]["databaseURL"]
-    })
+# --- Configuración Firebase Mejorada ---
+def initialize_firebase():
+    if not firebase_admin._apps:
+        try:
+            firebase_config = {
+                "type": st.secrets["firebase"]["type"],
+                "project_id": st.secrets["firebase"]["project_id"],
+                "private_key_id": st.secrets["firebase"]["private_key_id"],
+                "private_key": st.secrets["firebase"]["private_key"].replace('\\n', '\n'),
+                "client_email": st.secrets["firebase"]["client_email"],
+                "client_id": st.secrets["firebase"]["client_id"],
+                "auth_uri": st.secrets["firebase"]["auth_uri"],
+                "token_uri": st.secrets["firebase"]["token_uri"],
+                "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
+                "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"]
+            }
+            cred = credentials.Certificate(firebase_config)
+            firebase_admin.initialize_app(cred, {
+                'databaseURL': st.secrets["firebase"]["databaseURL"]
+            })
+            return True
+        except Exception as e:
+            st.error(f"Error inicializando Firebase: {e}")
+            return False
+    return True
 
-# --- Listeners en Tiempo Real ---
-def setup_realtime_listeners():
-    def inventory_listener(event):
-        if event.data:
-            st.session_state.inventario = event.data
-            st.rerun()
-    
-    def sales_listener(event):
-        if event.data:
-            st.session_state.ventas = event.data
-            st.rerun()
-    
-    # Configurar listeners
-    db.reference('/inventario').listen(inventory_listener)
-    db.reference('/ventas').listen(sales_listener)
+if not initialize_firebase():
+    st.stop()
 
-# Iniciar listeners en un hilo separado
-threading.Thread(target=setup_realtime_listeners, daemon=True).start()
-
-# --- Funciones Principales ---
+# --- Datos Iniciales ---
 def cargar_datos_iniciales():
     return {
         "inventario": {
@@ -122,35 +112,72 @@ def cargar_datos_iniciales():
                 "Ambrosia Chocolate": {"precio": 1.40, "stock": 0, "costo": 0.70},
                 "Ambrosia Frutas Confitadas": {"precio": 1.40, "stock": 0, "costo": 0.70},
                 "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
-            }   
-        },
+            },
         "ventas": []
     }
 
-def guardar_venta(venta):
-    ref = db.reference('/ventas')
-    ventas = ref.get() or []
-    ventas.append(venta)
-    ref.set(ventas)
+# --- Funciones de Firebase Mejoradas ---
+def get_firebase_data():
+    """Obtiene datos de Firebase con manejo de errores"""
+    try:
+        return {
+            "inventario": db.reference('/inventario').get() or cargar_datos_iniciales()["inventario"],
+            "ventas": db.reference('/ventas').get() or []
+        }
+    except Exception as e:
+        st.error(f"Error conectando a Firebase: {e}")
+        return cargar_datos_iniciales()
 
-def actualizar_inventario(inventario):
-    db.reference('/inventario').set(inventario)
+def guardar_venta_segura(venta):
+    try:
+        ref = db.reference('/ventas')
+        ventas_actuales = ref.get() or []
+        ventas_actuales.append(venta)
+        ref.set(ventas_actuales)
+        return True
+    except Exception as e:
+        st.error(f"Error guardando venta: {e}")
+        return False
 
-# --- Interfaz Streamlit ---
+def actualizar_stock_seguro(categoria, producto, cantidad):
+    try:
+        ref = db.reference(f'/inventario/{categoria}/{producto}/stock')
+        ref.transaction(lambda current: (current or 0) - cantidad)
+        return True
+    except Exception as e:
+        st.error(f"Error actualizando stock: {e}")
+        return False
+
+# --- Interfaz Streamlit Mejorada ---
 def main():
-    # Inicializar datos
-    if 'inventario' not in st.session_state:
-        st.session_state.inventario = db.reference('/inventario').get() or cargar_datos_iniciales()["inventario"]
-        st.session_state.ventas = db.reference('/ventas').get() or []
-        st.session_state.carrito = {}
+    st.set_page_config(page_title="SweetBakery POS", page_icon="🍰", layout="wide")
     
-    # Menú principal
+    # Inicialización segura de datos
+    if 'inventario' not in st.session_state:
+        firebase_data = get_firebase_data()
+        st.session_state.update({
+            "inventario": firebase_data["inventario"],
+            "ventas": firebase_data["ventas"],
+            "carrito": {},
+            "metodo_pago": "Efectivo",
+            "last_update": time.time()
+        })
+    
+    # Actualización periódica segura (cada 30 segundos)
+    if time.time() - st.session_state.last_update > 30:
+        firebase_data = get_firebase_data()
+        st.session_state.inventario = firebase_data["inventario"]
+        st.session_state.ventas = firebase_data["ventas"]
+        st.session_state.last_update = time.time()
+    
+    # Sidebar principal
     st.sidebar.title("🍰 SweetBakery POS")
     opcion = st.sidebar.radio(
-        "Menú",
-        ["Punto de Venta", "Gestión de Inventario", "Reportes"]
+        "Menú Principal",
+        ["Punto de Venta", "Gestión de Inventario", "Reportes"],
+        horizontal=True
     )
-
+    
     if opcion == "Punto de Venta":
         mostrar_punto_venta()
     elif opcion == "Gestión de Inventario":
@@ -158,24 +185,42 @@ def main():
     elif opcion == "Reportes":
         mostrar_reportes()
 
+# --- Punto de Venta Mejorado ---
 def mostrar_punto_venta():
     st.header("🛒 Punto de Venta")
     
-    # Búsqueda de productos
-    busqueda = st.text_input("🔍 Buscar producto por nombre", key="busqueda_venta")
+    # Búsqueda mejorada
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        busqueda = st.text_input("🔍 Buscar producto", placeholder="Nombre del producto...")
+    with col2:
+        st.session_state.metodo_pago = st.selectbox(
+            "Método de Pago",
+            ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
+            key="select_metodo_pago"
+        )
     
-    # Mostrar productos disponibles
+    # Mostrar productos con mejor UI
     for categoria, productos in st.session_state.inventario.items():
-        with st.expander(f"📁 {categoria}"):
+        with st.expander(f"📦 {categoria}", expanded=True):
+            cols = st.columns(3)
+            col_idx = 0
+            
             for producto, datos in productos.items():
-                if busqueda.lower() in producto.lower():
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        st.write(f"**{producto}** - ${datos['precio']:.2f} (Stock: {datos['stock']})")
-                    with col2:
-                        if st.button(f"➕", 
-                                   key=f"add_{producto}",
-                                   disabled=datos['stock'] <= 0):
+                if busqueda.lower() not in producto.lower():
+                    continue
+                    
+                with cols[col_idx]:
+                    card = st.container(border=True)
+                    card.markdown(f"**{producto}**")
+                    card.markdown(f"💵 Precio: ${datos['precio']:.2f}")
+                    
+                    stock_text = "✅ Disponible" if datos['stock'] > 0 else "❌ Agotado"
+                    color = "green" if datos['stock'] > 0 else "red"
+                    card.markdown(f"<span style='color:{color}'>{stock_text} ({datos['stock']})</span>", unsafe_allow_html=True)
+                    
+                    if datos['stock'] > 0:
+                        if card.button("➕ Añadir", key=f"add_{producto}", use_container_width=True):
                             if producto in st.session_state.carrito:
                                 st.session_state.carrito[producto]['cantidad'] += 1
                             else:
@@ -184,83 +229,113 @@ def mostrar_punto_venta():
                                     'precio': datos['precio'],
                                     'categoria': categoria
                                 }
-                            # Actualizar stock localmente
-                            st.session_state.inventario[categoria][producto]['stock'] -= 1
-                            # Sincronizar con Firebase
-                            actualizar_inventario(st.session_state.inventario)
+                            if not actualizar_stock_seguro(categoria, producto, 1):
+                                st.session_state.carrito[producto]['cantidad'] -= 1
+                                if st.session_state.carrito[producto]['cantidad'] <= 0:
+                                    del st.session_state.carrito[producto]
                             st.rerun()
-
-    # Mostrar carrito
+                    else:
+                        card.button("❌ Agotado", disabled=True, use_container_width=True)
+                    
+                    if datos['stock'] < 3 and datos['stock'] > 0:
+                        card.warning(f"¡Últimas {datos['stock']} unidades!")
+                
+                col_idx = (col_idx + 1) % 3
+    
+    # Carrito mejorado
     if st.session_state.carrito:
-        st.sidebar.header("📋 Factura Actual")
-        total = 0
-        productos_a_eliminar = []
-        
-        for producto, item in st.session_state.carrito.items():
-            subtotal = item['cantidad'] * item['precio']
-            col1, col2, col3 = st.sidebar.columns([4, 2, 1])
-            with col1:
-                st.write(f"{producto}")
-            with col2:
-                st.write(f"x{item['cantidad']} = ${subtotal:.2f}")
-            with col3:
-                if st.button("❌", key=f"del_{producto}"):
-                    productos_a_eliminar.append(producto)
-                    # Devolver stock al inventario
-                    st.session_state.inventario[item['categoria']][producto]['stock'] += item['cantidad']
-                    actualizar_inventario(st.session_state.inventario)
+        with st.sidebar:
+            st.header("📋 Factura Actual")
+            total = 0
+            productos_a_eliminar = []
             
-            total += subtotal
-        
-        # Eliminar productos marcados
-        for producto in productos_a_eliminar:
-            del st.session_state.carrito[producto]
-        
-        if productos_a_eliminar:
-            st.rerun()
-        
-        st.sidebar.markdown("---")
-        st.sidebar.markdown(f"**Total: ${total:.2f}**")
-        
-        # Finalizar venta
-        if st.sidebar.button("✅ Finalizar Venta", type="primary"):
-            nueva_venta = {
-                'fecha': datetime.now().isoformat(),
-                'productos': st.session_state.carrito,
-                'total': total,
-                'metodo_pago': "Efectivo"  # Puedes hacer esto configurable
-            }
-            guardar_venta(nueva_venta)
-            st.session_state.carrito = {}
-            st.sidebar.success("Venta registrada correctamente!")
-            st.rerun()
+            for producto, item in st.session_state.carrito.items():
+                subtotal = item['cantidad'] * item['precio']
+                total += subtotal
+                
+                col1, col2, col3 = st.columns([5, 3, 1])
+                col1.write(f"▪️ {producto}")
+                col2.write(f"x{item['cantidad']} = ${subtotal:.2f}")
+                if col3.button("❌", key=f"del_{producto}"):
+                    productos_a_eliminar.append(producto)
+            
+            # Eliminar productos del carrito
+            for producto in productos_a_eliminar:
+                item = st.session_state.carrito[producto]
+                if actualizar_stock_seguro(item['categoria'], producto, -item['cantidad']):
+                    del st.session_state.carrito[producto]
+                    st.rerun()
+            
+            st.divider()
+            st.markdown(f"**Total a Pagar:** ${total:.2f}")
+            
+            if st.button("✅ Finalizar Venta", type="primary", use_container_width=True):
+                if not st.session_state.carrito:
+                    st.warning("El carrito está vacío")
+                    return
+                
+                venta = {
+                    'fecha': datetime.now().isoformat(),
+                    'productos': st.session_state.carrito.copy(),
+                    'total': total,
+                    'metodo_pago': st.session_state.metodo_pago
+                }
+                
+                if guardar_venta_segura(venta):
+                    st.session_state.carrito = {}
+                    st.success("Venta registrada exitosamente!")
+                    time.sleep(1)
+                    st.rerun()
+    else:
+        st.sidebar.info("🛒 El carrito está vacío. Añade productos para comenzar.")
 
+# --- Inventario Mejorado ---
 def mostrar_inventario():
     st.header("📦 Gestión de Inventario")
     
-    # Editor de inventario
-    with st.form("form_editar_inventario"):
-        categorias = list(st.session_state.inventario.keys())
-        categoria = st.selectbox("Categoría", categorias)
-        producto = st.text_input("Nombre del Producto")
-        precio = st.number_input("Precio", min_value=0.0, step=0.1, format="%.2f")
-        stock = st.number_input("Stock", min_value=0, step=1)
+    # Editor de inventario mejorado
+    with st.form("form_editar_inventario", border=True):
+        st.subheader("✏️ Editar Producto")
         
-        if st.form_submit_button("Guardar Cambios"):
-            if producto:
+        categorias = list(st.session_state.inventario.keys())
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            categoria = st.selectbox("Categoría", categorias)
+            producto = st.text_input("Nombre del Producto")
+            stock = st.number_input("Stock Disponible", min_value=0, step=1)
+        
+        with col2:
+            precio = st.number_input("Precio de Venta", min_value=0.0, step=0.1, format="%.2f")
+            costo = st.number_input("Costo Unitario", min_value=0.0, step=0.1, format="%.2f")
+        
+        submitted = st.form_submit_button("💾 Guardar Producto", type="primary")
+        
+        if submitted:
+            if not producto:
+                st.error("El nombre del producto es requerido")
+                return
+            
+            try:
                 if categoria not in st.session_state.inventario:
                     st.session_state.inventario[categoria] = {}
                 
                 st.session_state.inventario[categoria][producto] = {
                     'precio': precio,
                     'stock': stock,
-                    'costo': precio * 0.5  # Ajusta según necesidad
+                    'costo': costo
                 }
-                actualizar_inventario(st.session_state.inventario)
-                st.success("¡Inventario actualizado!")
+                
+                db.reference('/inventario').set(st.session_state.inventario)
+                st.success("¡Producto actualizado correctamente!")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {str(e)}")
     
-    # Mostrar inventario actual
-    st.subheader("Inventario Actual")
+    # Visualización de inventario mejorada
+    st.subheader("📊 Inventario Actual")
+    
     inventario_df = []
     for categoria, productos in st.session_state.inventario.items():
         for producto, datos in productos.items():
@@ -268,128 +343,224 @@ def mostrar_inventario():
                 "Categoría": categoria,
                 "Producto": producto,
                 "Precio": datos['precio'],
+                "Costo": datos['costo'],
+                "Margen": datos['precio'] - datos['costo'],
                 "Stock": datos['stock'],
-                "Costo": datos.get('costo', 0)
+                "Valor Stock": datos['stock'] * datos['costo']
             })
     
+    df = pd.DataFrame(inventario_df)
+    
+    # Mostrar métricas resumen
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Productos", len(df))
+    col2.metric("Valor Total Stock", f"${df['Valor Stock'].sum():,.2f}")
+    col3.metric("Margen Promedio", f"${df['Margen'].mean():.2f}")
+    
+    # Mostrar tabla con filtros
+    with st.expander("🔍 Filtros Avanzados"):
+        filtro_categoria = st.multiselect(
+            "Filtrar por categoría",
+            options=df['Categoría'].unique(),
+            default=df['Categoría'].unique()
+        )
+        filtro_stock = st.slider(
+            "Filtrar por stock mínimo",
+            min_value=0,
+            max_value=int(df['Stock'].max()) if len(df) > 0 else 100,
+            value=0
+        )
+    
+    df_filtrado = df[
+        (df['Categoría'].isin(filtro_categoria)) & 
+        (df['Stock'] >= filtro_stock)
+    ]
+    
     st.dataframe(
-        pd.DataFrame(inventario_df),
+        df_filtrado,
         column_config={
             "Precio": st.column_config.NumberColumn(format="$%.2f"),
             "Costo": st.column_config.NumberColumn(format="$%.2f"),
+            "Margen": st.column_config.NumberColumn(format="$%.2f"),
+            "Valor Stock": st.column_config.NumberColumn(format="$%.2f"),
             "Stock": st.column_config.ProgressColumn(
-                format="%d", 
-                min_value=0, 
-                max_value=100
+                format="%d",
+                min_value=0,
+                max_value=df['Stock'].max() if len(df) > 0 else 100
             )
         },
         hide_index=True,
         use_container_width=True
     )
 
+# --- Reportes Mejorados ---
 def mostrar_reportes():
-    st.header("📊 Reportes Diarios")
+    st.header("📊 Reportes Avanzados")
     
-    # Filtrar ventas por fecha
-    fecha_reporte = st.date_input("Seleccionar fecha", datetime.now())
+    # Selector de fechas mejorado
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_inicio = st.date_input("Fecha de inicio", datetime.now())
+    with col2:
+        fecha_fin = st.date_input("Fecha de fin", datetime.now())
+    
+    if fecha_fin < fecha_inicio:
+        st.error("La fecha de fin no puede ser anterior a la fecha de inicio")
+        return
+    
+    # Filtrar ventas
     ventas_filtradas = [
-        v for v in st.session_state.ventas 
-        if datetime.fromisoformat(v['fecha']).date() == fecha_reporte
+        v for v in st.session_state.ventas
+        if fecha_inicio <= datetime.fromisoformat(v['fecha']).date() <= fecha_fin
     ]
     
     if not ventas_filtradas:
-        st.warning("No hay ventas para esta fecha")
+        st.warning("No hay ventas en el período seleccionado")
         return
     
-    # Reporte por método de pago
-    st.subheader("💳 Ventas por Método de Pago")
-    df_metodos = pd.DataFrame(ventas_filtradas).groupby('metodo_pago')['total'].agg(['sum', 'count']).reset_index()
-    df_metodos.columns = ['Método', 'Total', 'Transacciones']
-    st.dataframe(
-        df_metodos,
-        column_config={"Total": st.column_config.NumberColumn(format="$%.2f")},
-        hide_index=True
-    )
+    # Métricas rápidas
+    total_ventas = sum(v['total'] for v in ventas_filtradas)
+    num_ventas = len(ventas_filtradas)
+    avg_venta = total_ventas / num_ventas if num_ventas > 0 else 0
     
-    # Reporte por producto
-    st.subheader("🍰 Productos Vendidos")
-    productos_vendidos = []
-    for venta in ventas_filtradas:
-        for producto, datos in venta['productos'].items():
-            productos_vendidos.append({
-                'Producto': producto,
-                'Cantidad': datos['cantidad'],
-                'Total': datos['cantidad'] * datos['precio']
-            })
+    st.subheader("📈 Resumen General")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Ventas", f"${total_ventas:,.2f}")
+    col2.metric("N° Transacciones", num_ventas)
+    col3.metric("Ticket Promedio", f"${avg_venta:.2f}")
     
-    df_productos = pd.DataFrame(productos_vendidos).groupby('Producto').sum().reset_index()
-    st.dataframe(
-        df_productos,
-        column_config={"Total": st.column_config.NumberColumn(format="$%.2f")},
-        hide_index=True
-    )
+    # Pestañas para diferentes reportes
+    tab1, tab2, tab3 = st.tabs(["Métodos de Pago", "Productos Vendidos", "Análisis por Categoría"])
     
-    # Generar PDF
-    if st.button("📄 Generar Reporte PDF"):
-        pdf_buffer = generar_reporte_pdf(ventas_filtradas, fecha_reporte)
-        st.download_button(
-            label="⬇️ Descargar Reporte",
-            data=pdf_buffer,
-            file_name=f"reporte_{fecha_reporte.strftime('%Y-%m-%d')}.pdf",
-            mime="application/pdf"
-        )
+    with tab1:
+        st.subheader("💳 Ventas por Método de Pago")
+        df_metodos = pd.DataFrame(ventas_filtradas).groupby('metodo_pago')['total'].agg(['sum', 'count']).reset_index()
+        df_metodos.columns = ['Método', 'Total', 'Transacciones']
+        
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.dataframe(
+                df_metodos,
+                column_config={
+                    "Total": st.column_config.NumberColumn(format="$%.2f")
+                },
+                hide_index=True
+            )
+        with col2:
+            st.bar_chart(df_metodos.set_index('Método')['Total'])
+    
+    with tab2:
+        st.subheader("🍰 Productos Vendidos")
+        productos_vendidos = []
+        for venta in ventas_filtradas:
+            for producto, datos in venta['productos'].items():
+                productos_vendidos.append({
+                    'Producto': producto,
+                    'Cantidad': datos['cantidad'],
+                    'Total': datos['cantidad'] * datos['precio'],
+                    'Categoría': datos.get('categoria', 'Desconocida')
+                })
+        
+        df_productos = pd.DataFrame(productos_vendidos)
+        
+        if not df_productos.empty:
+            df_agrupado = df_productos.groupby('Producto').agg({
+                'Cantidad': 'sum',
+                'Total': 'sum'
+            }).sort_values('Total', ascending=False).reset_index()
+            
+            st.dataframe(
+                df_agrupado,
+                column_config={
+                    "Total": st.column_config.NumberColumn(format="$%.2f")
+                },
+                hide_index=True
+            )
+    
+    with tab3:
+        st.subheader("📦 Ventas por Categoría")
+        if not df_productos.empty:
+            df_categorias = df_productos.groupby('Categoría').agg({
+                'Cantidad': 'sum',
+                'Total': 'sum'
+            }).sort_values('Total', ascending=False).reset_index()
+            
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.dataframe(
+                    df_categorias,
+                    column_config={
+                        "Total": st.column_config.NumberColumn(format="$%.2f")
+                    },
+                    hide_index=True
+                )
+            with col2:
+                st.bar_chart(df_categorias.set_index('Categoría')['Total'])
+    
+    # Generación de PDF mejorada
+    st.subheader("📄 Exportar Reporte")
+    if st.button("🖨️ Generar PDF", type="primary"):
+        with st.spinner("Generando reporte..."):
+            pdf_buffer = generar_reporte_pdf(ventas_filtradas, fecha_inicio, fecha_fin)
+            st.download_button(
+                label="⬇️ Descargar Reporte",
+                data=pdf_buffer,
+                file_name=f"reporte_{fecha_inicio}_a_{fecha_fin}.pdf",
+                mime="application/pdf"
+            )
 
-def generar_reporte_pdf(ventas, fecha):
+def generar_reporte_pdf(ventas, fecha_inicio, fecha_fin):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     styles = getSampleStyleSheet()
     story = []
     
-    # Título
-    story.append(Paragraph(f"Reporte Diario - {fecha.strftime('%d/%m/%Y')}", styles['Title']))
-    story.append(Spacer(1, 12))
-    
-    # Resumen por método de pago
-    story.append(Paragraph("1. Resumen por Método de Pago", styles['Heading2']))
-    df_metodos = pd.DataFrame(ventas).groupby('metodo_pago')['total'].agg(['sum', 'count']).reset_index()
-    data_metodos = [df_metodos.columns.tolist()] + df_metodos.values.tolist()
-    t_metodos = Table(data_metodos)
-    t_metodos.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    story.append(t_metodos)
+    # Encabezado
+    story.append(Paragraph("SweetBakery - Reporte de Ventas", styles['Title']))
+    story.append(Paragraph(f"Período: {fecha_inicio.strftime('%d/%m/%Y')} - {fecha_fin.strftime('%d/%m/%Y')}", styles['Heading2']))
     story.append(Spacer(1, 24))
     
-    # Productos vendidos
-    story.append(Paragraph("2. Productos Vendidos", styles['Heading2']))
-    productos = []
+    # Resumen general
+    total_ventas = sum(v['total'] for v in ventas)
+    num_ventas = len(ventas)
+    
+    story.append(Paragraph("Resumen General", styles['Heading2']))
+    data_resumen = [
+        ["Total Ventas", f"${total_ventas:,.2f}"],
+        ["N° de Transacciones", num_ventas],
+        ["Ticket Promedio", f"${total_ventas/num_ventas if num_ventas > 0 else 0:.2f}"]
+    ]
+    t_resumen = Table(data_resumen)
+    t_resumen.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 12),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER')
+    ]))
+    story.append(t_resumen)
+    story.append(Spacer(1, 24))
+    
+    # Productos más vendidos
+    productos = {}
     for venta in ventas:
         for prod, det in venta['productos'].items():
-            productos.append([prod, det['cantidad'], f"${det['cantidad'] * det['precio']:.2f}"])
+            if prod not in productos:
+                productos[prod] = 0
+            productos[prod] += det['cantidad']
     
-    data_productos = [["Producto", "Cantidad", "Total"]] + productos
-    t_productos = Table(data_productos)
-    t_productos.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    story.append(t_productos)
-    
-    # Total general
-    total_dia = sum(v['total'] for v in ventas)
-    story.append(Spacer(1, 24))
-    story.append(Paragraph(f"Total General del Día: ${total_dia:.2f}", styles['Heading2']))
+    if productos:
+        story.append(Paragraph("Productos Más Vendidos", styles['Heading2']))
+        productos_ordenados = sorted(productos.items(), key=lambda x: x[1], reverse=True)[:10]
+        data_productos = [["Producto", "Cantidad"]] + [[p[0], str(p[1])] for p in productos_ordenados]
+        t_productos = Table(data_productos)
+        t_productos.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(t_productos)
     
     doc.build(story)
     buffer.seek(0)
