@@ -114,7 +114,7 @@ def cargar_datos_iniciales():
                 "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
             },
         "ventas": []
-    }
+    }}
 
 # --- Funciones de Firebase Mejoradas ---
 def get_firebase_data():
