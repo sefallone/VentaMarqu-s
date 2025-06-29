@@ -43,6 +43,14 @@ def initialize_firebase():
             st.stop()
     return True
 
+    try:
+        st.write("Probando conexión a Firebase...")
+        test_ref = db.reference('/test_connection')
+        test_ref.set({"timestamp": datetime.now().isoformat()})
+        st.success("¡Conexión exitosa a Firebase!")
+    except Exception as e:
+        st.error(f"Fallo en la conexión: {str(e)}")
+
 
 # --- Datos Iniciales ---
 def cargar_datos_iniciales():
