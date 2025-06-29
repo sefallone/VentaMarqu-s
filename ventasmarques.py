@@ -10,39 +10,44 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- Configuración Firebase Mejorada ---
-# --- Configuración Firebase Corregida ---
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
-            # Obtener la clave privada directamente (ya está bien formateada)
-            private_key = st.secrets["firebase"]["private_key"]
+            # Verifica que todos los secrets existen
+            required_keys = ["type", "project_id", "private_key_id", "private_key",
+                           "client_email", "client_id", "auth_uri", "token_uri",
+                           "auth_provider_x509_cert_url", "client_x509_cert_url", "databaseURL"]
             
+            missing_keys = [key for key in required_keys if key not in st.secrets.firebase]
+            if missing_keys:
+                st.error(f"Faltan configuraciones: {', '.join(missing_keys)}")
+                return False
+
+            # Formatea correctamente la clave privada
+            private_key = st.secrets.firebase.private_key.replace('\\n', '\n')
+
             firebase_config = {
-                "type": st.secrets["firebase"]["type"],
-                "project_id": st.secrets["firebase"]["project_id"],
-                "private_key_id": st.secrets["firebase"]["private_key_id"],
+                "type": st.secrets.firebase.type,
+                "project_id": st.secrets.firebase.project_id,
+                "private_key_id": st.secrets.firebase.private_key_id,
                 "private_key": private_key,
-                "client_email": st.secrets["firebase"]["client_email"],
-                "client_id": st.secrets["firebase"]["client_id"],
-                "auth_uri": st.secrets["firebase"]["auth_uri"],
-                "token_uri": st.secrets["firebase"]["token_uri"],
-                "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
-                "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"]
+                "client_email": st.secrets.firebase.client_email,
+                "client_id": st.secrets.firebase.client_id,
+                "auth_uri": st.secrets.firebase.auth_uri,
+                "token_uri": st.secrets.firebase.token_uri,
+                "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
+                "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
             }
-            
+
             cred = credentials.Certificate(firebase_config)
             firebase_admin.initialize_app(cred, {
-                'databaseURL': st.secrets["firebase"]["databaseURL"]
+                'databaseURL': st.secrets.firebase.databaseURL
             })
             return True
         except Exception as e:
             st.error(f"Error inicializando Firebase: {str(e)}")
             return False
     return True
-if not initialize_firebase():
-    st.stop()
-
 # --- Datos Iniciales ---
 def cargar_datos_iniciales():
     return {
