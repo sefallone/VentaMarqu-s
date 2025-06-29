@@ -11,14 +11,22 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
 # --- Configuración Firebase Mejorada ---
+# --- Configuración Firebase Corregida ---
 def initialize_firebase():
     if not firebase_admin._apps:
         try:
+            # Obtener la clave privada correctamente formateada
+            private_key = st.secrets["firebase"]["private_key"]
+            
+            # Asegurar que los saltos de línea sean interpretados correctamente
+            if isinstance(private_key, str):
+                private_key = private_key.replace('\\n', '\n')
+            
             firebase_config = {
                 "type": st.secrets["firebase"]["type"],
                 "project_id": st.secrets["firebase"]["project_id"],
                 "private_key_id": st.secrets["firebase"]["private_key_id"],
-                "private_key": st.secrets["firebase"]["private_key"].replace('\\n', '\n'),
+                "private_key": private_key,  # Ya corregido
                 "client_email": st.secrets["firebase"]["client_email"],
                 "client_id": st.secrets["firebase"]["client_id"],
                 "auth_uri": st.secrets["firebase"]["auth_uri"],
@@ -26,13 +34,14 @@ def initialize_firebase():
                 "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
                 "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"]
             }
+            
             cred = credentials.Certificate(firebase_config)
             firebase_admin.initialize_app(cred, {
                 'databaseURL': st.secrets["firebase"]["databaseURL"]
             })
             return True
         except Exception as e:
-            st.error(f"Error inicializando Firebase: {e}")
+            st.error(f"Error inicializando Firebase: {str(e)}")
             return False
     return True
 
