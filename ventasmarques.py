@@ -61,25 +61,20 @@ def firebase_operation_with_retry(func):
 # ======================
 
 # Configuración global
-APP_NAME = "SweetBakeryPOS"  # Nombre real de la aplicación, sin comillas en FIREBASE_APP_NAME
+FIREBASE_APP_NAME = 'SweetBakeryPOS_UniqueAppName'
 
 def initialize_firebase():
-    """Inicialización robusta de Firebase con manejo completo de errores"""
+    """Inicialización segura de Firebase con manejo de instancias múltiples"""
     try:
-        # 1. Verificar si ya está inicializada
-        try:
-            existing_app = firebase_admin.get_app(APP_NAME)
-            st.session_state.firebase_initialized = True
+        # Verificar si ya está inicializada
+        if firebase_admin._apps and FIREBASE_APP_NAME in firebase_admin._apps:
             return True
-        except ValueError:
-            pass  # No existe, continuamos con la inicialización
-
-        # 2. Validar secrets
+            
         if not hasattr(st, 'secrets') or not st.secrets.get("firebase"):
-            st.error("Configuración de Firebase no encontrada")
+            st.error("Configuración de Firebase no encontrada en secrets")
             return False
 
-        # 3. Configurar credenciales
+        # Configuración de credenciales
         firebase_config = {
             "type": st.secrets.firebase.type,
             "project_id": st.secrets.firebase.project_id,
@@ -93,60 +88,45 @@ def initialize_firebase():
             "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
         }
 
-        # 4. Inicializar la aplicación con nombre explícito
+        # Inicializar con nombre específico
         cred = credentials.Certificate(firebase_config)
         firebase_admin.initialize_app(
             cred,
             {
                 'databaseURL': st.secrets.firebase.databaseURL,
-                'name': APP_NAME  # Usamos la constante definida
+                'name': FIREBASE_APP_NAME  # Nombre único aquí
             }
         )
 
-        # 5. Probar la conexión
-        test_ref = db.reference('/connection_test', app=firebase_admin.get_app(APP_NAME))
+        # Prueba de conexión
+        test_ref = db.reference('/connection_test', app=firebase_admin.get_app(FIREBASE_APP_NAME))
         test_ref.set({'timestamp': datetime.now().isoformat()})
         test_ref.delete()
 
         st.session_state.firebase_initialized = True
-        st.success("Firebase inicializado correctamente")
+        st.success("✅ Firebase inicializado correctamente")
         return True
 
     except Exception as e:
-        st.error(f"Error inicializando Firebase: {str(e)}")
-        # Limpiar en caso de error
+        st.error(f"🔥 Error inicializando Firebase: {str(e)}")
+        # Limpieza en caso de error
         try:
-            firebase_admin.delete_app(firebase_admin.get_app(APP_NAME))
+            firebase_admin.delete_app(firebase_admin.get_app(FIREBASE_APP_NAME))
         except:
             pass
         st.session_state.firebase_initialized = False
         return False
 
-
-def monitor_connection():
-    """Monitorea la conexión periódicamente"""
-    while True:
-        time.sleep(30)
-        
-        if not st.session_state.get('firebase_initialized', False):
-            continue
-            
-        try:
-            app = firebase_admin.get_app('FIREBASE_APP_NAME')
-            test_ref = db.reference('/connection_test', app=app)
-            test_ref.set({'heartbeat': datetime.now().isoformat()}, timeout=5)
-            test_ref.delete()
-            st.session_state.last_connection_check = time.time()
-        except Exception as e:
-            st.session_state.firebase_initialized = False
-            st.warning(f"⚠️ Se perdió la conexión con Firebase. Error: {str(e)}")
-            try:
-                firebase_admin.delete_app(firebase_admin.get_app('FIREBASE_APP_NAME'))
-            except:
-                pass
-            initialize_firebase()
-
-@firebase_operation_with_retry
+def get_firebase_ref(path):
+    """Obtiene referencia segura a la base de datos con reconexión automática"""
+    try:
+        app = firebase_admin.get_app(FIREBASE_APP_NAME)
+        return db.reference(path, app=app)
+    except ValueError as e:
+        st.warning("⚠️ Reconectando con Firebase...")
+        if initialize_firebase():
+            return get_firebase_ref(path)
+        raise ConnectionError("No se pudo conectar a Firebase")@firebase_operation_with_retry
 def get_firebase_data():
     """Obtiene datos con caché inteligente y manejo de errores"""
     now = time.time()
