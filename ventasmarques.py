@@ -127,8 +127,7 @@ def initialize_firebase():
         st.error(f"Error crítico inicializando Firebase: {str(e)}")
         if 'firebase_admin._apps' in locals():
             try:
-                firebase_admin.delete_app(firebase_admin.get_app('https://ventasmarques.streamlit.app/
-'))
+                firebase_admin.delete_app(firebase_admin.get_app('https://ventasmarques.streamlit.app/'))
             except:
                 pass
         st.session_state.firebase_initialized = False
@@ -142,8 +141,7 @@ def monitor_connection():
             continue
             
         try:
-            app = firebase_admin.get_app('https://ventasmarques.streamlit.app/
-')
+            app = firebase_admin.get_app('https://ventasmarques.streamlit.app/')
             test_ref = db.reference('/connection_test', app=app)
             test_ref.set({'heartbeat': datetime.now().isoformat()}, timeout=5)
             test_ref.delete()
@@ -152,8 +150,7 @@ def monitor_connection():
             st.session_state.firebase_initialized = False
             st.warning(f"⚠️ Se perdió la conexión con Firebase. Error: {str(e)}")
             try:
-                firebase_admin.delete_app(firebase_admin.get_app('https://ventasmarques.streamlit.app/
-'))
+                firebase_admin.delete_app(firebase_admin.get_app('https://ventasmarques.streamlit.app/'))
             except:
                 pass
             initialize_firebase()
