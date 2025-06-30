@@ -1,251 +1,248 @@
-# Importaciones necesarias
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
-from datetime import datetime, date
-import pandas as pd
+from datetime import datetime, timedelta
 import time
+from functools import wraps
+import threading
+import pandas as pd
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-def initialize_firebase():
-    if not firebase_admin._apps:
-        try:
-            # Verificar que todos los secrets requeridos existen
-            required_keys = [
-                "type", "project_id", "private_key_id", "private_key",
-                "client_email", "client_id", "auth_uri", "token_uri",
-                "auth_provider_x509_cert_url", "client_x509_cert_url", "databaseURL"
-            ]
-            
-            missing_keys = [key for key in required_keys if key not in st.secrets.firebase]
-            if missing_keys:
-                st.error(f"Faltan configuraciones requeridas: {', '.join(missing_keys)}")
-                return False
+# ======================
+# CONFIGURACIÓN GLOBAL
+# ======================
+FIREBASE_MAX_RETRIES = 3
+FIREBASE_RETRY_DELAY = 2  # segundos
+FIREBASE_CACHE_TTL = 60  # segundos para datos en caché
+FIREBASE_TIMEOUT = 10  # segundos para operaciones
 
-            # Formatear correctamente la clave privada
-            private_key = st.secrets.firebase.private_key
-            private_key = private_key.replace('\\n', '\n').strip()
-            
-            if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
-                private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
-            if not private_key.endswith("-----END PRIVATE KEY-----"):
-                private_key = private_key + "\n-----END PRIVATE KEY-----"
-
-            firebase_config = {
-                "type": st.secrets.firebase.type,
-                "project_id": st.secrets.firebase.project_id,
-                "private_key_id": st.secrets.firebase.private_key_id,
-                "private_key": private_key,
-                "client_email": st.secrets.firebase.client_email,
-                "client_id": st.secrets.firebase.client_id,
-                "auth_uri": st.secrets.firebase.auth_uri,
-                "token_uri": st.secrets.firebase.token_uri,
-                "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
-                "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
-            }
-
-            # Validación adicional de la clave
-            if "PRIVATE KEY" not in private_key or "BEGIN" not in private_key or "END" not in private_key:
-                st.error("Formato de clave privada inválido")
-                return False
-
-            cred = credentials.Certificate(firebase_config)
-            app = firebase_admin.initialize_app(cred, {
-                'databaseURL': st.secrets.firebase.databaseURL,
-                'name': 'SweetBakeryPOS'
-            })
-
-            # Prueba de conexión inmediata
+# ======================
+# DECORADORES
+# ======================
+def firebase_operation_with_retry(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        last_error = None
+        for attempt in range(FIREBASE_MAX_RETRIES):
             try:
-                test_ref = db.reference('/connection_test', app=app)
-                test_ref.set({'test': datetime.now().isoformat()})
-                test_ref.delete()
-            except Exception as test_error:
-                st.error(f"Error en prueba de conexión: {str(test_error)}")
-                firebase_admin.delete_app(app)
-                return False
+                if not st.session_state.get('firebase_initialized', False):
+                    initialize_firebase()
+                
+                return func(*args, **kwargs)
+                
+            except Exception as e:
+                last_error = e
+                st.session_state.firebase_attempts = attempt + 1
+                st.session_state.next_retry_time = time.time() + (FIREBASE_RETRY_DELAY * (attempt + 1))
+                
+                if attempt < FIREBASE_MAX_RETRIES - 1:  # No mostrar mensaje en el último intento
+                    st.warning(f"Intento {attempt + 1} fallido. Reintentando en {FIREBASE_RETRY_DELAY * (attempt + 1)} segundos...")
+                    time.sleep(FIREBASE_RETRY_DELAY * (attempt + 1))
+                
+                # Intentar reconectar en caso de error de conexión
+                if attempt == 1:  # Solo intentar reconectar en el segundo fallo
+                    try:
+                        firebase_admin.delete_app(firebase_admin.get_app('SweetBakeryPOS'))
+                        st.session_state.firebase_initialized = False
+                    except:
+                        pass
+        
+        st.error(f"Operación fallida después de {FIREBASE_MAX_RETRIES} intentos: {str(last_error)}")
+        st.session_state.firebase_initialized = False
+        raise last_error
+    return wrapper
 
-            return True
-        except Exception as e:
-            st.error(f"Error crítico inicializando Firebase: {str(e)}")
-            return False
-    return True
-# --- Datos Iniciales (Fallback) ---
-def cargar_datos_iniciales():
-    """Retorna datos iniciales predefinidos para usar como fallback"""
-    return {
-        "inventario": {
-            "Pastelería": {
-                "Dulce Tres Leche (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
-                "Milhojas Arequipe (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
-                "Mousse de Chocolate (porción)": {"precio": 4.80, "stock": 0, "costo": 2.40},
-                "Mousse de Parchita (porción)": {"precio": 3.70, "stock": 1, "costo": 1.85},
-                "Ópera (porción)": {"precio": 3.70, "stock": 2 , "costo": 1.85},
-                "Petit Fours (Mini Dulce)": {"precio": 0.80, "stock": 10, "costo": 0.40},
-                "Profiterol (porción)": {"precio": 4.20, "stock": 0, "costo": 2.10},
-                "Sacher (porción)": {"precio": 3, "stock": 0, "costo": 1.5},
-                "Cheesecake Arequipe (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
-                "Cheesecake Fresa (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
-                "Cheesecake Chocolate (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
-                "Cheesecake Pistacho (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
-                "Selva Negra (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
-                "Tartaleta Limón (porción)": {"precio": 4.30, "stock": 0, "costo": 2.65},
-                "Tartaleta Parchita (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
-                "Torta Imposible (porción)": {"precio": 2.50, "stock": 0, "costo": 1.25},
-                "Torta Pan (porción)": {"precio": 2.80, "stock": 0, "costo": 1.40},
-                "Brazo Gitano Limón (porción)": {"precio": 2.20, "stock": 0, "costo": 1.10},
-                "Brazo Gitano Arequipe (porción)": {"precio": 2.20, "stock": 3, "costo": 1.10},
-                "Brazo Gitano Chocolate (porción)": {"precio": 2.20, "stock": 2, "costo": 1.10}
-            },
-            "Hojaldre": {
-                "Hojaldre de Pollo": {"precio": 3.50, "stock": 2, "costo": 1.75},
-                "Hojaldre de Carne": {"precio": 3.00, "stock": 2, "costo": 1.50},
-                "Hojaldre de Queso": {"precio": 3.00, "stock": 1, "costo": 1.50},
-                "Hojaldre de Jamón": {"precio": 3.00, "stock": 1, "costo": 1.50},
-                "Croissant de Pavo/ Queso Crema": {"precio": 3.50, "stock": 0, "costo": 1.75},
-                "Cachito de Queso": {"precio": 3.00, "stock": 2, "costo": 1.50},
-                "Cachito de Jamón": {"precio": 3.00, "stock": 2, "costo": 1.50},
-                "Cachito de Pavo/Queso Crema": {"precio": 3.20, "stock": 1, "costo": 1.60},
-                "Croissant": {"precio": 2.60, "stock": 2, "costo": 1.30}
-                                
-            },
-            "Bebidas": {
-                "Café Pequeño": {"precio": 1.30, "stock": 200, "costo": 0.65},
-                "Café Grande": {"precio": 2.60, "stock": 200, "costo": 1.30},
-                "Mocchaccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
-                "Cappuccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
-                "Chocolate Caliente": {"precio": 3.00, "stock": 200, "costo": 1.50},
-                "Café Arte París": {"precio": 3.50, "stock": 200, "costo": 1.75},
-                "Jugo Naranja": {"precio": 2.50, "stock": 200, "costo": 1.25},
-                "Jugo Fresa": {"precio": 3, "stock": 200, "costo": 1.50},
-                "Jugo Melocoton": {"precio": 3, "stock": 200, "costo": 1.50},
-                "Jugo Guayaba": {"precio": 2.50, "stock": 200, "costo": 1.25},
-                "Jugo Piña": {"precio": 2.50, "stock": 200, "costo": 1.25},
-                "Jugo Lechoza": {"precio": 2.50, "stock": 200, "costo": 1.25},
-                "Jugo Mora": {"precio": 3, "stock": 200, "costo": 1.50},
-                "Agua Mineral": {"precio": 2, "stock": 8, "costo": 1},
-                "Té caliente": {"precio": 2.00, "stock": 200, "costo": 1.00},
-                "Malta Retornable": {"precio": 1.00, "stock": 11, "costo": 0.50},
-                "Nestea": {"precio": 3.00, "stock": 200, "costo": 1.50},
-                "Refresco Bomba": {"precio": 1.50, "stock": 200, "costo": 0.75},
-                "Flor de Jamaica Frío": {"precio": 2.50, "stock": 200, "costo": 1.25},
-                "Papelón con Limón": {"precio": 2.50, "stock": 200, "costo": 1.25}
-            },
-            "Dulces Secos": {
-                "Mini Dulce Manzana": {"precio": 1.25, "stock": 8, "costo": 0.625},
-                "Mini Croissant Chocolate": {"precio": 0.80, "stock": 2, "costo": 0.40},
-                "Trio Mini Dulces": {"precio": 3.40, "stock": 0, "costo": 1.70},
-                "Trio Mini Croissant": {"precio": 2.20, "stock": 0, "costo": 1.10},
-                "Palmeras": {"precio": 3.20, "stock": 2, "costo": 1.60},
-                "Panque Marmoleado": {"precio": 2.50, "stock": 0, "costo": 1.25},
-                "Hojaldre de Manzana": {"precio": 4, "stock": 2, "costo": 2},
-                "Galletas Arte París Chocolate": {"precio": 2.50, "stock": 5, "costo": 1.25},
-                "Galletas Arte París Avena/Pasas": {"precio": 2.50, "stock": 5, "costo": 1.25},
-                "Ambrosia Chocolate": {"precio": 1.40, "stock": 0, "costo": 0.70},
-                "Ambrosia Frutas Confitadas": {"precio": 1.40, "stock": 0, "costo": 0.70},
-                "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
-            }   
-        },
-        "ventas": []
-    }
+# ======================
+# FUNCIONES FIREBASE
+# ======================
+def initialize_firebase():
+    """Inicialización robusta de Firebase con validación mejorada"""
+    if st.session_state.get('firebase_initialized', False):
+        return True
+        
+    if not st.secrets.get('firebase'):
+        st.error("Configuración de Firebase no encontrada en secrets")
+        return False
 
-# --- Funciones Optimizadas de Firebase ---
-def get_firebase_data():
-    """Obtiene datos de Firebase con caché y manejo de errores mejorado"""
     try:
-        # Usar caché si está disponible y es reciente (menos de 2 minutos)
-        cache_valid = (time.time() - st.session_state.get('last_firebase_update', 0)) < 120
-        if 'inventario_cache' in st.session_state and 'ventas_cache' in st.session_state and cache_valid:
-            return {
-                "inventario": st.session_state.inventario_cache,
-                "ventas": st.session_state.ventas_cache
-            }
+        # Validación mejorada de credenciales
+        required_config = {
+            "type": "service_account",
+            "project_id": str,
+            "private_key_id": str,
+            "private_key": str,
+            "client_email": str,
+            "client_id": str,
+            "auth_uri": str,
+            "token_uri": str,
+            "auth_provider_x509_cert_url": str,
+            "client_x509_cert_url": str,
+            "databaseURL": str
+        }
 
-        # Obtener datos frescos de Firebase
+        missing_keys = [key for key in required_config if key not in st.secrets.firebase]
+        if missing_keys:
+            st.error(f"Configuración faltante: {', '.join(missing_keys)}")
+            return False
+
+        # Formateo automático de clave privada
+        private_key = st.secrets.firebase.private_key.strip()
+        if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
+            private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
+        if not private_key.endswith("-----END PRIVATE KEY-----"):
+            private_key = private_key + "\n-----END PRIVATE KEY-----"
+
+        firebase_config = {
+            **{k: st.secrets.firebase[k] for k in required_config if k != "databaseURL"},
+            "private_key": private_key
+        }
+
+        # Validación de certificado
+        cred = credentials.Certificate(firebase_config)
+        
+        # Configuración con timeout explícito
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': st.secrets.firebase.databaseURL,
+            'name': 'SweetBakeryPOS',
+            'options': {'httpTimeout': FIREBASE_TIMEOUT}
+        })
+
+        # Prueba de conexión robusta
+        test_ref = db.reference('/connection_test')
+        test_ref.set({'timestamp': datetime.now().isoformat()}, timeout=5)
+        test_ref.delete()
+        
+        # Iniciar hilo de monitoreo de conexión
+        if not st.session_state.get('monitor_thread_running', False):
+            threading.Thread(target=monitor_connection, daemon=True).start()
+            st.session_state.monitor_thread_running = True
+        
+        st.session_state.firebase_initialized = True
+        st.session_state.last_connection_check = time.time()
+        st.session_state.firebase_attempts = 0
+        st.session_state.next_retry_time = None
+        st.toast("✅ Conexión a Firebase establecida", icon="✅")
+        return True
+        
+    except Exception as e:
+        st.error(f"Error crítico inicializando Firebase: {str(e)}")
+        if 'firebase_admin._apps' in locals():
+            try:
+                firebase_admin.delete_app(firebase_admin.get_app('SweetBakeryPOS'))
+            except:
+                pass
+        return False
+
+def monitor_connection():
+    """Monitorea la conexión periódicamente"""
+    while True:
+        time.sleep(30)  # Verificar cada 30 segundos
+        
+        if not st.session_state.get('firebase_initialized', False):
+            continue
+            
+        try:
+            # Prueba liviana de conexión
+            test_ref = db.reference('/connection_test')
+            test_ref.set({'heartbeat': datetime.now().isoformat()}, timeout=5)
+            test_ref.delete()
+            st.session_state.last_connection_check = time.time()
+        except Exception as e:
+            st.session_state.firebase_initialized = False
+            st.warning(f"⚠️ Se perdió la conexión con Firebase. Error: {str(e)}")
+            initialize_firebase()  # Intentar reconectar
+
+@firebase_operation_with_retry
+def get_firebase_data():
+    """Obtiene datos con caché inteligente y manejo de errores"""
+    now = time.time()
+    cache_valid = (now - st.session_state.get('last_firebase_fetch', 0)) < FIREBASE_CACHE_TTL
+    
+    # Usar caché si es válido
+    if cache_valid and 'inventario_cache' in st.session_state and 'ventas_cache' in st.session_state:
+        return {
+            "inventario": st.session_state.inventario_cache,
+            "ventas": st.session_state.ventas_cache
+        }
+    
+    # Obtener datos frescos
+    try:
         inventario_ref = db.reference('/inventario')
         ventas_ref = db.reference('/ventas')
         
-        inventario_data = inventario_ref.get() or {}
-        ventas_data = ventas_ref.get() or []
+        # Usar get() con timeout
+        inventario_data = inventario_ref.get(timeout=5) or {}
+        ventas_data = ventas_ref.get(timeout=5) or []
 
-        # Validar estructura de datos
+        # Validar estructura
         if not isinstance(inventario_data, dict) or not isinstance(ventas_data, list):
             raise ValueError("Estructura de datos inválida desde Firebase")
 
         # Actualizar caché
         st.session_state.inventario_cache = inventario_data
         st.session_state.ventas_cache = ventas_data
-        st.session_state.last_firebase_update = time.time()
-
+        st.session_state.last_firebase_fetch = now
+        
         return {
             "inventario": inventario_data,
             "ventas": ventas_data
         }
+        
     except Exception as e:
-        st.warning(f"Error obteniendo datos: {str(e)}. Usando caché o datos iniciales.")
+        st.warning(f"Error obteniendo datos: {str(e)}. Usando caché local.")
         return {
-            "inventario": st.session_state.get('inventario_cache', cargar_datos_iniciales()["inventario"]),
+            "inventario": st.session_state.get('inventario_cache', {}),
             "ventas": st.session_state.get('ventas_cache', [])
         }
 
+@firebase_operation_with_retry
 def guardar_venta(venta):
-    """Guarda una venta con validación y manejo de errores mejorado"""
+    """Guarda una venta con transacción atómica"""
     if not validar_venta(venta):
-        st.error("La estructura de la venta no es válida")
-        return False
+        raise ValueError("Estructura de venta inválida")
+    
+    ref = db.reference('/ventas')
+    ventas = ref.get(timeout=5) or []
+    ventas.append(venta)
+    ref.set(ventas, timeout=5)
+    
+    # Actualizar caché local
+    if 'ventas_cache' in st.session_state:
+        st.session_state.ventas_cache.append(venta)
+    
+    return True
 
-    try:
-        ref = db.reference('/ventas')
-        with st.spinner("Guardando venta..."):
-            # Transacción atómica
-            ventas = ref.get() or []
-            ventas.append(venta)
-            ref.set(ventas)
-            
-            # Actualizar caché local
-            if 'ventas_cache' in st.session_state:
-                st.session_state.ventas_cache.append(venta)
-            
-            st.toast("Venta registrada exitosamente", icon="✅")
-            return True
-    except Exception as e:
-        st.error(f"Error guardando venta: {str(e)}")
-        return False
-
+@firebase_operation_with_retry
 def actualizar_stock(categoria, producto, cantidad):
-    """Actualiza stock con transacción y validación"""
-    try:
-        ref = db.reference(f'/inventario/{categoria}/{producto}/stock')
-        
-        # Transacción atómica con validación
-        def update_transaction(current):
-            current = current or 0
-            new_value = current - cantidad
-            if new_value < 0:
-                return None  # Abortar transacción
-            return new_value
+    """Actualiza stock con transacción atómica mejorada"""
+    ref = db.reference(f'/inventario/{categoria}/{producto}/stock')
+    
+    def transaction_callback(current_stock):
+        current_stock = current_stock or 0
+        new_value = current_stock - cantidad
+        if new_value < 0:
+            raise ValueError("Stock insuficiente")
+        return new_value
+    
+    success, new_value = ref.transaction(
+        transaction_callback,
+        timeout=5
+    )
+    
+    if success and 'inventario_cache' in st.session_state:
+        if (categoria in st.session_state.inventario_cache and 
+            producto in st.session_state.inventario_cache[categoria]):
+            st.session_state.inventario_cache[categoria][producto]['stock'] = new_value
+    
+    return success
 
-        success, new_value = ref.transaction(update_transaction)
-        
-        if success:
-            # Actualizar caché local
-            if 'inventario_cache' in st.session_state:
-                if (categoria in st.session_state.inventario_cache and 
-                    producto in st.session_state.inventario_cache[categoria]):
-                    st.session_state.inventario_cache[categoria][producto]['stock'] = new_value
-            return True
-        else:
-            st.error("No hay suficiente stock disponible")
-            return False
-    except Exception as e:
-        st.error(f"Error actualizando stock: {str(e)}")
-        return False
-
-# --- Funciones de Validación Mejoradas ---
+# ======================
+# FUNCIONES DE VALIDACIÓN
+# ======================
 def validar_producto(producto):
     """Valida la estructura completa de un producto"""
     required_keys = ['precio', 'stock', 'costo']
@@ -261,103 +258,63 @@ def validar_producto(producto):
 def validar_venta(venta):
     """Valida la estructura completa de una venta"""
     required_keys = ['fecha', 'productos', 'total', 'metodo_pago']
-    if not (isinstance(venta, dict) and all(key in venta for key in required_keys)):
+    if not (isinstance(venta, dict) and all(key in venta for key in required_keys):
         return False
     
-    if not (isinstance(venta['total'], (int, float)) and venta['total'] >= 0):
+    if not (isinstance(venta['total'], (int, float)) or venta['total'] < 0:
         return False
         
-    if not (isinstance(venta['productos'], dict) and len(venta['productos']) > 0):
+    if not (isinstance(venta['productos'], dict) or len(venta['productos']) == 0:
         return False
         
     for producto, detalles in venta['productos'].items():
         required_detalles = ['cantidad', 'precio', 'categoria']
-        if not (isinstance(detalles, dict) and all(key in detalles for key in required_detalles)):
+        if not (isinstance(detalles, dict) and all(key in detalles for key in required_detalles):
             return False
             
     return True
 
-# --- Interfaz Streamlit Mejorada ---
-def main():
-    """Función principal con inicialización robusta"""
-    st.set_page_config(
-        page_title="SweetBakery POS",
-        page_icon="🍰",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
-    # --- Inicialización del Estado Mejorada ---
-    default_state = {
-        "inventario": {},
-        "ventas": [],
-        "carrito": {},
-        "metodo_pago": "Efectivo",
-        "firebase_initialized": False,
-        "inventario_cache": None,
-        "ventas_cache": None,
-        "last_firebase_update": 0,
-        "last_ui_update": time.time(),
-        "selected_category": None
-    }
-
-    for key, value in default_state.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
-
-    # --- Conexión Firebase Mejorada ---
-    if not st.session_state.firebase_initialized:
-        with st.spinner("Inicializando sistema..."):
-            if initialize_firebase():
-                st.session_state.firebase_initialized = True
-                firebase_data = get_firebase_data()
-                st.session_state.inventario = firebase_data["inventario"]
-                st.session_state.ventas = firebase_data["ventas"]
-                st.toast("Conexión con Firebase establecida", icon="✅")
-            else:
-                initial_data = cargar_datos_iniciales()
-                st.session_state.inventario = initial_data["inventario"]
-                st.session_state.ventas = initial_data["ventas"]
-                st.toast("Modo offline - Usando datos locales", icon="⚠️")
-
-    # --- Actualización Periódica Mejorada ---
-    if st.session_state.firebase_initialized and (time.time() - st.session_state.last_firebase_update > 30):
-        with st.spinner("Sincronizando datos..."):
-            firebase_data = get_firebase_data()
-            st.session_state.inventario = firebase_data["inventario"]
-            st.session_state.ventas = firebase_data["ventas"]
-            st.session_state.last_firebase_update = time.time()
-
-    # --- UI Principal ---
-    mostrar_estado_conexion()
-    
-    st.sidebar.title("🍰 SweetBakery POS")
-    menu_options = ["Punto de Venta", "Gestión de Inventario", "Reportes"]
-    opcion = st.sidebar.radio(
-        "Menú Principal",
-        menu_options,
-        index=0
-    )
-
-    if opcion == "Punto de Venta":
-        mostrar_punto_venta()
-    elif opcion == "Gestión de Inventario":
-        mostrar_inventario()
-    elif opcion == "Reportes":
-        mostrar_reportes()
-
-# --- Componentes UI Mejorados ---
+# ======================
+# COMPONENTES DE INTERFAZ
+# ======================
 def mostrar_estado_conexion():
-    """Muestra el estado de conexión en el sidebar"""
+    """Muestra el estado de conexión con indicadores visuales"""
     status_container = st.sidebar.container()
     
-    if st.session_state.firebase_initialized:
-        last_update = datetime.fromtimestamp(st.session_state.last_firebase_update).strftime('%H:%M:%S')
-        status_container.success(f"✅ Conectado\nÚltima sincronización: {last_update}")
+    if st.session_state.get('firebase_initialized', False):
+        last_update = datetime.fromtimestamp(
+            st.session_state.get('last_connection_check', time.time())
+        ).strftime('%H:%M:%S')
+        
+        status_container.success(f"✅ Conectado\nÚltima verificación: {last_update}")
+        
+        # Indicador de latencia
+        try:
+            start_time = time.time()
+            test_ref = db.reference('/connection_test')
+            test_ref.set({'latency_test': datetime.now().isoformat()}, timeout=3)
+            test_ref.delete()
+            latency = (time.time() - start_time) * 1000  # ms
+            status_container.metric("Latencia", f"{latency:.0f} ms")
+        except:
+            pass
     else:
-        status_container.warning("⚠️ Modo offline\nUsando datos locales")
+        status_container.error("🔴 Desconectado")
+        
+        if st.session_state.get('firebase_attempts', 0) > 0:
+            next_retry = st.session_state.get('next_retry_time')
+            if next_retry:
+                remaining = max(0, (next_retry - time.time()))
+                status_container.warning(f"Reintentando en {remaining:.0f}s...")
+        
+        if status_container.button("Reconectar manualmente"):
+            initialize_firebase()
+            st.rerun()
     
-    status_container.progress(min(100, (time.time() - st.session_state.last_firebase_update) / 30 * 100))
+    status_container.progress(
+        min(100, 100 * (time.time() - st.session_state.get('last_firebase_fetch', 0)) / FIREBASE_CACHE_TTL),
+        text="Actualización de datos"
+    )
 
 def mostrar_punto_venta():
     """Interfaz del punto de venta mejorada"""
@@ -484,7 +441,6 @@ def mostrar_punto_venta():
         else:
             st.info("🛒 El carrito está vacío. Añade productos para comenzar.")
 
-
 def mostrar_inventario():
     """Interfaz para la gestión del inventario."""
     st.header("📦 Gestión de Inventario")
@@ -506,7 +462,7 @@ def mostrar_inventario():
         
         if selected_categoria == nueva_categoria_option:
             categoria_input = st.text_input("Nombre de la Nueva Categoría", key="inv_nueva_categoria_input")
-            categoria_final = categoria_input if categoria_input else "Nueva Categoría" # Usar el input o un placeholder
+            categoria_final = categoria_input if categoria_input else "Nueva Categoría"
         else:
             categoria_final = selected_categoria
 
@@ -560,7 +516,7 @@ def mostrar_inventario():
                 db.reference('/inventario').set(st.session_state.inventario)
                 st.success("¡Producto actualizado correctamente!")
                 time.sleep(1)
-                st.rerun() # Forzar rerun para actualizar la tabla y los selects
+                st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar el producto en Firebase: {str(e)}")
     
@@ -570,10 +526,8 @@ def mostrar_inventario():
     inventario_df_data = []
     for categoria, productos in st.session_state.inventario.items():
         for producto, datos in productos.items():
-            # Calcular margen solo si precio y costo son válidos
-            margen = datos['precio'] - datos['costo'] if datos['precio'] is not None and datos['costo'] is not None else 0.0
-            # Calcular valor stock solo si stock y costo son válidos
-            valor_stock = datos['stock'] * datos['costo'] if datos['stock'] is not None and datos['costo'] is not None else 0.0
+            margen = datos['precio'] - datos['costo']
+            valor_stock = datos['stock'] * datos['costo']
             
             inventario_df_data.append({
                 "Categoría": categoria,
@@ -634,7 +588,6 @@ def mostrar_inventario():
     else:
         st.info("No hay productos en el inventario. Añade algunos usando el formulario de arriba.")
 
-# --- Reportes Mejorados ---
 def mostrar_reportes():
     """Interfaz para mostrar reportes de ventas."""
     st.header("📊 Reportes Avanzados")
@@ -642,18 +595,17 @@ def mostrar_reportes():
     # Selector de fechas mejorado
     col1, col2 = st.columns(2)
     with col1:
-        # Asegurarse de que la fecha de inicio no sea futura
-        fecha_inicio_default = datetime.now().date().replace(day=1) # Primer día del mes actual
+        fecha_inicio_default = datetime.now().date().replace(day=1)
         if 'report_fecha_inicio' not in st.session_state:
             st.session_state.report_fecha_inicio = fecha_inicio_default
         fecha_inicio = st.date_input("Fecha de inicio", value=st.session_state.report_fecha_inicio, key="report_fecha_inicio_input")
-        st.session_state.report_fecha_inicio = fecha_inicio # Actualizar estado de sesión
+        st.session_state.report_fecha_inicio = fecha_inicio
     with col2:
-        fecha_fin_default = datetime.now().date() # Hoy
+        fecha_fin_default = datetime.now().date()
         if 'report_fecha_fin' not in st.session_state:
             st.session_state.report_fecha_fin = fecha_fin_default
         fecha_fin = st.date_input("Fecha de fin", value=st.session_state.report_fecha_fin, key="report_fecha_fin_input")
-        st.session_state.report_fecha_fin = fecha_fin # Actualizar estado de sesión
+        st.session_state.report_fecha_fin = fecha_fin
     
     if fecha_fin < fecha_inicio:
         st.error("La fecha de fin no puede ser anterior a la fecha de inicio.")
@@ -667,7 +619,6 @@ def mostrar_reportes():
             if fecha_inicio <= venta_fecha <= fecha_fin:
                 ventas_filtradas.append(v)
         except ValueError:
-            # Manejar ventas con formato de fecha inválido
             st.warning(f"Se encontró una venta con formato de fecha inválido y fue omitida: {v.get('fecha', 'N/A')}")
             continue
     
@@ -702,7 +653,7 @@ def mostrar_reportes():
                     "Total": st.column_config.NumberColumn(format="$%.2f")
                 },
                 hide_index=True,
-                use_container_width=True # Asegurar que la tabla se expande
+                use_container_width=True
             )
         with col2:
             st.bar_chart(df_metodos.set_index('Método')['Total'])
@@ -712,9 +663,8 @@ def mostrar_reportes():
         productos_vendidos = []
         for venta in ventas_filtradas:
             for producto, datos in venta['productos'].items():
-                # Asegurarse de que 'categoria' y 'costo' existan, con valores por defecto si no
                 categoria = datos.get('categoria', 'Desconocida')
-                costo_unitario = datos.get('costo', 0) # Obtener costo unitario del producto en la venta
+                costo_unitario = datos.get('costo', 0)
                 
                 productos_vendidos.append({
                     'Producto': producto,
@@ -746,13 +696,13 @@ def mostrar_reportes():
                 hide_index=True,
                 use_container_width=True
             )
-            st.bar_chart(df_agrupado.set_index('Producto')['Total Venta'].head(10)) # Top 10 productos
+            st.bar_chart(df_agrupado.set_index('Producto')['Total Venta'].head(10))
         else:
             st.info("No hay datos de productos vendidos para mostrar.")
     
     with tab3:
         st.subheader("📦 Ventas por Categoría")
-        if not df_productos.empty: # Reutilizar df_productos de la pestaña anterior
+        if not df_productos.empty:
             df_categorias = df_productos.groupby('Categoría').agg({
                 'Cantidad': 'sum',
                 'Total Venta': 'sum',
@@ -833,15 +783,14 @@ def generar_reporte_pdf(ventas, fecha_inicio, fecha_fin):
     df_metodos.columns = ['Método', 'Total Venta', 'Transacciones']
     data_metodos = [df_metodos.columns.tolist()] + df_metodos.values.tolist()
     
-    # Formatear el total de venta para la tabla PDF
     for row_idx, row in enumerate(data_metodos):
-        if row_idx > 0: # Saltar el encabezado
+        if row_idx > 0:
             row[1] = f"${row[1]:,.2f}"
-            row[2] = int(row[2]) # Asegurar que las transacciones son enteros
+            row[2] = int(row[2])
     
     t_metodos = Table(data_metodos)
     t_metodos.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F2F6')), # Un color claro para el encabezado
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F2F6')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -859,7 +808,7 @@ def generar_reporte_pdf(ventas, fecha_inicio, fecha_fin):
         for prod_nombre, datos in venta['productos'].items():
             cantidad = datos['cantidad']
             precio_unitario = datos['precio']
-            costo_unitario = datos.get('costo', 0) # Usar 0 si no se encuentra el costo
+            costo_unitario = datos.get('costo', 0)
 
             if prod_nombre not in productos_agrupados:
                 productos_agrupados[prod_nombre] = {'Cantidad': 0, 'Total Venta': 0, 'Costo Total': 0, 'Margen Bruto': 0}
@@ -877,12 +826,11 @@ def generar_reporte_pdf(ventas, fecha_inicio, fecha_fin):
 
         data_productos = [df_productos_pdf.columns.tolist()] + df_productos_pdf.values.tolist()
 
-        # Formatear columnas monetarias
         for row_idx, row in enumerate(data_productos):
-            if row_idx > 0: # Saltar el encabezado
-                row[2] = f"${row[2]:,.2f}" # Total Venta
-                row[3] = f"${row[3]:,.2f}" # Costo Total
-                row[4] = f"${row[4]:,.2f}" # Margen Bruto
+            if row_idx > 0:
+                row[2] = f"${row[2]:,.2f}"
+                row[3] = f"${row[3]:,.2f}"
+                row[4] = f"${row[4]:,.2f}"
         
         t_productos = Table(data_productos)
         t_productos.setStyle(TableStyle([
@@ -900,6 +848,150 @@ def generar_reporte_pdf(ventas, fecha_inicio, fecha_fin):
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+# ======================
+# FUNCIÓN PRINCIPAL
+# ======================
+def main():
+    """Función principal con inicialización robusta"""
+    st.set_page_config(
+        page_title="SweetBakery POS",
+        page_icon="🍰",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    # --- Inicialización del Estado ---
+    default_state = {
+        "inventario": {},
+        "ventas": [],
+        "carrito": {},
+        "metodo_pago": "Efectivo",
+        "firebase_initialized": False,
+        "inventario_cache": None,
+        "ventas_cache": None,
+        "last_firebase_fetch": 0,
+        "last_connection_check": 0,
+        "firebase_attempts": 0,
+        "next_retry_time": None,
+        "monitor_thread_running": False,
+        "report_fecha_inicio": datetime.now().date().replace(day=1),
+        "report_fecha_fin": datetime.now().date()
+    }
+
+    for key, value in default_state.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    # --- Conexión Firebase ---
+    if not st.session_state.firebase_initialized:
+        with st.spinner("Inicializando sistema..."):
+            if initialize_firebase():
+                firebase_data = get_firebase_data()
+                st.session_state.inventario = firebase_data["inventario"]
+                st.session_state.ventas = firebase_data["ventas"]
+            else:
+                st.session_state.inventario = cargar_datos_iniciales()["inventario"]
+                st.session_state.ventas = cargar_datos_iniciales()["ventas"]
+
+    # --- UI Principal ---
+    mostrar_estado_conexion()
+    
+    st.sidebar.title("🍰 SweetBakery POS")
+    menu_options = ["Punto de Venta", "Gestión de Inventario", "Reportes"]
+    opcion = st.sidebar.radio(
+        "Menú Principal",
+        menu_options,
+        index=0
+    )
+
+    if opcion == "Punto de Venta":
+        mostrar_punto_venta()
+    elif opcion == "Gestión de Inventario":
+        mostrar_inventario()
+    elif opcion == "Reportes":
+        mostrar_reportes()
+
+# ======================
+# DATOS INICIALES
+# ======================
+def cargar_datos_iniciales():
+    """Retorna datos iniciales predefinidos para usar como fallback"""
+    return {
+        "inventario": {
+            "Pastelería": {
+                "Dulce Tres Leche (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
+                "Milhojas Arequipe (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
+                "Mousse de Chocolate (porción)": {"precio": 4.80, "stock": 0, "costo": 2.40},
+                "Mousse de Parchita (porción)": {"precio": 3.70, "stock": 1, "costo": 1.85},
+                "Ópera (porción)": {"precio": 3.70, "stock": 2 , "costo": 1.85},
+                "Petit Fours (Mini Dulce)": {"precio": 0.80, "stock": 10, "costo": 0.40},
+                "Profiterol (porción)": {"precio": 4.20, "stock": 0, "costo": 2.10},
+                "Sacher (porción)": {"precio": 3, "stock": 0, "costo": 1.5},
+                "Cheesecake Arequipe (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
+                "Cheesecake Fresa (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
+                "Cheesecake Chocolate (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
+                "Cheesecake Pistacho (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
+                "Selva Negra (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
+                "Tartaleta Limón (porción)": {"precio": 4.30, "stock": 0, "costo": 2.65},
+                "Tartaleta Parchita (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
+                "Torta Imposible (porción)": {"precio": 2.50, "stock": 0, "costo": 1.25},
+                "Torta Pan (porción)": {"precio": 2.80, "stock": 0, "costo": 1.40},
+                "Brazo Gitano Limón (porción)": {"precio": 2.20, "stock": 0, "costo": 1.10},
+                "Brazo Gitano Arequipe (porción)": {"precio": 2.20, "stock": 3, "costo": 1.10},
+                "Brazo Gitano Chocolate (porción)": {"precio": 2.20, "stock": 2, "costo": 1.10}
+            },
+            "Hojaldre": {
+                "Hojaldre de Pollo": {"precio": 3.50, "stock": 2, "costo": 1.75},
+                "Hojaldre de Carne": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Hojaldre de Queso": {"precio": 3.00, "stock": 1, "costo": 1.50},
+                "Hojaldre de Jamón": {"precio": 3.00, "stock": 1, "costo": 1.50},
+                "Croissant de Pavo/ Queso Crema": {"precio": 3.50, "stock": 0, "costo": 1.75},
+                "Cachito de Queso": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Cachito de Jamón": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Cachito de Pavo/Queso Crema": {"precio": 3.20, "stock": 1, "costo": 1.60},
+                "Croissant": {"precio": 2.60, "stock": 2, "costo": 1.30}
+                                
+            },
+            "Bebidas": {
+                "Café Pequeño": {"precio": 1.30, "stock": 200, "costo": 0.65},
+                "Café Grande": {"precio": 2.60, "stock": 200, "costo": 1.30},
+                "Mocchaccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Cappuccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Chocolate Caliente": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Café Arte París": {"precio": 3.50, "stock": 200, "costo": 1.75},
+                "Jugo Naranja": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Fresa": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Jugo Melocoton": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Jugo Guayaba": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Piña": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Lechoza": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Mora": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Agua Mineral": {"precio": 2, "stock": 8, "costo": 1},
+                "Té caliente": {"precio": 2.00, "stock": 200, "costo": 1.00},
+                "Malta Retornable": {"precio": 1.00, "stock": 11, "costo": 0.50},
+                "Nestea": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Refresco Bomba": {"precio": 1.50, "stock": 200, "costo": 0.75},
+                "Flor de Jamaica Frío": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Papelón con Limón": {"precio": 2.50, "stock": 200, "costo": 1.25}
+            },
+            "Dulces Secos": {
+                "Mini Dulce Manzana": {"precio": 1.25, "stock": 8, "costo": 0.625},
+                "Mini Croissant Chocolate": {"precio": 0.80, "stock": 2, "costo": 0.40},
+                "Trio Mini Dulces": {"precio": 3.40, "stock": 0, "costo": 1.70},
+                "Trio Mini Croissant": {"precio": 2.20, "stock": 0, "costo": 1.10},
+                "Palmeras": {"precio": 3.20, "stock": 2, "costo": 1.60},
+                "Panque Marmoleado": {"precio": 2.50, "stock": 0, "costo": 1.25},
+                "Hojaldre de Manzana": {"precio": 4, "stock": 2, "costo": 2},
+                "Galletas Arte París Chocolate": {"precio": 2.50, "stock": 5, "costo": 1.25},
+                "Galletas Arte París Avena/Pasas": {"precio": 2.50, "stock": 5, "costo": 1.25},
+                "Ambrosia Chocolate": {"precio": 1.40, "stock": 0, "costo": 0.70},
+                "Ambrosia Frutas Confitadas": {"precio": 1.40, "stock": 0, "costo": 0.70},
+                "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
+            }   
+        },
+        "ventas": []
+    }
 
 if __name__ == "__main__":
     main()
