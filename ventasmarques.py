@@ -11,30 +11,29 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- Configuración Mejorada de Firebase ---
 def initialize_firebase():
-    """Inicializa la conexión con Firebase con manejo robusto de errores"""
     if not firebase_admin._apps:
         try:
-            # Verificación completa de secrets
-            required_secrets = [
+            # Verificar que todos los secrets requeridos existen
+            required_keys = [
                 "type", "project_id", "private_key_id", "private_key",
                 "client_email", "client_id", "auth_uri", "token_uri",
                 "auth_provider_x509_cert_url", "client_x509_cert_url", "databaseURL"
             ]
             
-            missing_secrets = [key for key in required_secrets if key not in st.secrets.firebase]
-            if missing_secrets:
-                st.error(f"Configuración faltante en secrets.toml: {', '.join(missing_secrets)}")
+            missing_keys = [key for key in required_keys if key not in st.secrets.firebase]
+            if missing_keys:
+                st.error(f"Faltan configuraciones requeridas: {', '.join(missing_keys)}")
                 return False
 
-            # Formateo robusto de la clave privada
-            private_key = st.secrets.firebase.private_key.strip()
+            # Formatear correctamente la clave privada
+            private_key = st.secrets.firebase.private_key
+            private_key = private_key.replace('\\n', '\n').strip()
+            
             if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
                 private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
             if not private_key.endswith("-----END PRIVATE KEY-----"):
                 private_key = private_key + "\n-----END PRIVATE KEY-----"
-            private_key = private_key.replace('\\n', '\n')
 
             firebase_config = {
                 "type": st.secrets.firebase.type,
@@ -49,24 +48,32 @@ def initialize_firebase():
                 "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
             }
 
-            # Inicialización con nombre específico
+            # Validación adicional de la clave
+            if "PRIVATE KEY" not in private_key or "BEGIN" not in private_key or "END" not in private_key:
+                st.error("Formato de clave privada inválido")
+                return False
+
             cred = credentials.Certificate(firebase_config)
-            firebase_admin.initialize_app(cred, {
+            app = firebase_admin.initialize_app(cred, {
                 'databaseURL': st.secrets.firebase.databaseURL,
                 'name': 'SweetBakeryPOS'
             })
 
-            # Prueba de conexión
-            test_ref = db.reference('/connection_test')
-            test_ref.set({'timestamp': datetime.now().isoformat()})
-            test_ref.delete()
-            
+            # Prueba de conexión inmediata
+            try:
+                test_ref = db.reference('/connection_test', app=app)
+                test_ref.set({'test': datetime.now().isoformat()})
+                test_ref.delete()
+            except Exception as test_error:
+                st.error(f"Error en prueba de conexión: {str(test_error)}")
+                firebase_admin.delete_app(app)
+                return False
+
             return True
         except Exception as e:
-            st.error(f"Error inicializando Firebase: {str(e)}")
+            st.error(f"Error crítico inicializando Firebase: {str(e)}")
             return False
     return True
-
 # --- Datos Iniciales (Fallback) ---
 def cargar_datos_iniciales():
     """Retorna datos iniciales predefinidos para usar como fallback"""
