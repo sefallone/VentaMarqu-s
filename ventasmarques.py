@@ -160,34 +160,38 @@ def actualizar_stock(categoria, producto, cantidad):
 
 # --- Interfaz Streamlit ---
 def main():
-    """Función principal de la aplicación"""
-    st.set_page_config(page_title="SweetBakery POS", page_icon="🍰", layout="wide")
+    # 1. INICIALIZACIÓN ROBUSTA DEL ESTADO
+    required_state = {
+        "inventario": {},
+        "ventas": [],
+        "carrito": {},
+        "metodo_pago": "Efectivo",
+        "last_update": time.time(),  # <-- Inicializado con valor actual
+        "firebase_initialized": False
+    }
     
-    # Inicialización del estado de sesión
-    if 'inventario' not in st.session_state:
-        firebase_data = get_firebase_data()
-        st.session_state.update({
-            "inventario": firebase_data["inventario"],
-            "ventas": firebase_data["ventas"],
-            "carrito": {},
-            "metodo_pago": "Efectivo",
-            "last_update": time.time(),
-            "firebase_initialized": False
-        })
+    for key in required_state:
+        if key not in st.session_state:
+            st.session_state[key] = required_state[key]
     
-    # Inicializar Firebase si no está inicializado
+    # 2. CONEXIÓN CON FIREBASE
     if not st.session_state.firebase_initialized:
         if initialize_firebase():
             st.session_state.firebase_initialized = True
         else:
+            st.error("Error crítico: No se pudo conectar a Firebase")
             st.stop()
     
-    # Actualización periódica de datos (cada 30 segundos)
-    if time.time() - st.session_state.last_update > 30:
-        firebase_data = get_firebase_data()
-        st.session_state.inventario = firebase_data["inventario"]
-        st.session_state.ventas = firebase_data["ventas"]
-        st.session_state.last_update = time.time()
+    # 3. ACTUALIZACIÓN PERIÓDICA (CON MANEJO DE ERRORES)
+    try:
+        if time.time() - st.session_state.last_update > 30:
+            firebase_data = get_firebase_data()
+            if firebase_data:
+                st.session_state.inventario = firebase_data.get("inventario", {})
+                st.session_state.ventas = firebase_data.get("ventas", [])
+                st.session_state.last_update = time.time()
+    except Exception as e:
+        st.error(f"Error en actualización: {str(e)}")
     
     # Sidebar principal
     st.sidebar.title("🍰 SweetBakery POS")
