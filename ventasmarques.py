@@ -59,6 +59,12 @@ def firebase_operation_with_retry(func):
 # ======================
 # FUNCIONES FIREBASE
 # ======================
+
+# Configuración global
+FIREBASE_APP_NAME = 'arteparisdelicafe'  # Nombre consistente para la aplicación
+FIREBASE_TIMEOUT = 10  # segundos
+
+
 def initialize_firebase():
     """Inicialización robusta de Firebase con manejo de instancias existentes"""
     try:
