@@ -269,7 +269,7 @@ def validar_venta(venta):
         
     for producto, detalles in venta['productos'].items():
         required_detalles = ['cantidad', 'precio', 'categoria']
-        if not (isinstance(detalles, dict) and all(key in detalles for key in required_detalles):
+        if not (isinstance(detalles, dict) and all(key in detalles for key in required_detalles)):
             return False
             
     return True
