@@ -2,7 +2,7 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
-from datetime import datetime, date # Importar date para st.date_input
+from datetime import datetime, date
 import pandas as pd
 import time
 from io import BytesIO
@@ -11,27 +11,31 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- Funciones de Inicialización y Conexión a Firebase ---
-
+# --- Configuración Mejorada de Firebase ---
 def initialize_firebase():
-    """
-    Inicializa la aplicación de Firebase con las credenciales de Streamlit Secrets.
-    Retorna True si la inicialización es exitosa, False en caso contrario.
-    """
+    """Inicializa la conexión con Firebase con manejo robusto de errores"""
     if not firebase_admin._apps:
         try:
-            # Obtener la clave privada y asegurar el formato correcto
-            private_key = st.secrets.firebase.private_key
+            # Verificación completa de secrets
+            required_secrets = [
+                "type", "project_id", "private_key_id", "private_key",
+                "client_email", "client_id", "auth_uri", "token_uri",
+                "auth_provider_x509_cert_url", "client_x509_cert_url", "databaseURL"
+            ]
             
-            # Verificar que la clave comienza y termina correctamente
+            missing_secrets = [key for key in required_secrets if key not in st.secrets.firebase]
+            if missing_secrets:
+                st.error(f"Configuración faltante en secrets.toml: {', '.join(missing_secrets)}")
+                return False
+
+            # Formateo robusto de la clave privada
+            private_key = st.secrets.firebase.private_key.strip()
             if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
                 private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
             if not private_key.endswith("-----END PRIVATE KEY-----"):
                 private_key = private_key + "\n-----END PRIVATE KEY-----"
-            
-            # Reemplazar dobles barras invertidas si existen
             private_key = private_key.replace('\\n', '\n')
-            
+
             firebase_config = {
                 "type": st.secrets.firebase.type,
                 "project_id": st.secrets.firebase.project_id,
@@ -44,30 +48,28 @@ def initialize_firebase():
                 "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
                 "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
             }
-            
-            # Verificar la configuración antes de inicializar
-            required_keys = ["type", "project_id", "private_key_id", "private_key",
-                             "client_email", "client_id", "auth_uri", "token_uri",
-                             "auth_provider_x509_cert_url", "client_x509_cert_url"]
-            
-            for key in required_keys:
-                if not firebase_config.get(key):
-                    st.error(f"Falta configuración requerida en st.secrets para Firebase: {key}")
-                    return False
-            
+
+            # Inicialización con nombre específico
             cred = credentials.Certificate(firebase_config)
             firebase_admin.initialize_app(cred, {
-                'databaseURL': st.secrets.firebase.databaseURL
+                'databaseURL': st.secrets.firebase.databaseURL,
+                'name': 'SweetBakeryPOS'
             })
+
+            # Prueba de conexión
+            test_ref = db.reference('/connection_test')
+            test_ref.set({'timestamp': datetime.now().isoformat()})
+            test_ref.delete()
+            
             return True
         except Exception as e:
-            st.error(f"Error inicializando Firebase. Asegúrate de que st.secrets está configurado correctamente. Detalles: {str(e)}")
+            st.error(f"Error inicializando Firebase: {str(e)}")
             return False
     return True
 
 # --- Datos Iniciales (Fallback) ---
 def cargar_datos_iniciales():
-    """Retorna datos iniciales predefinidos para usar como fallback si Firebase no está disponible."""
+    """Retorna datos iniciales predefinidos para usar como fallback"""
     return {
         "inventario": {
             "Pastelería": {
@@ -102,7 +104,7 @@ def cargar_datos_iniciales():
                 "Cachito de Jamón": {"precio": 3.00, "stock": 2, "costo": 1.50},
                 "Cachito de Pavo/Queso Crema": {"precio": 3.20, "stock": 1, "costo": 1.60},
                 "Croissant": {"precio": 2.60, "stock": 2, "costo": 1.30}
-                                        
+                                
             },
             "Bebidas": {
                 "Café Pequeño": {"precio": 1.30, "stock": 200, "costo": 0.65},
@@ -139,126 +141,197 @@ def cargar_datos_iniciales():
                 "Ambrosia Chocolate": {"precio": 1.40, "stock": 0, "costo": 0.70},
                 "Ambrosia Frutas Confitadas": {"precio": 1.40, "stock": 0, "costo": 0.70},
                 "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
-            }    
+            }   
         },
         "ventas": []
     }
 
-# --- Funciones de Firebase Mejoradas ---
+# --- Funciones Optimizadas de Firebase ---
 def get_firebase_data():
-    """
-    Obtiene los datos de inventario y ventas de Firebase.
-    Retorna un diccionario con "inventario" y "ventas", o datos iniciales si falla.
-    """
+    """Obtiene datos de Firebase con caché y manejo de errores mejorado"""
     try:
-        inventario_data = db.reference('/inventario').get()
-        ventas_data = db.reference('/ventas').get()
+        # Usar caché si está disponible y es reciente (menos de 2 minutos)
+        cache_valid = (time.time() - st.session_state.get('last_firebase_update', 0)) < 120
+        if 'inventario_cache' in st.session_state and 'ventas_cache' in st.session_state and cache_valid:
+            return {
+                "inventario": st.session_state.inventario_cache,
+                "ventas": st.session_state.ventas_cache
+            }
+
+        # Obtener datos frescos de Firebase
+        inventario_ref = db.reference('/inventario')
+        ventas_ref = db.reference('/ventas')
+        
+        inventario_data = inventario_ref.get() or {}
+        ventas_data = ventas_ref.get() or []
+
+        # Validar estructura de datos
+        if not isinstance(inventario_data, dict) or not isinstance(ventas_data, list):
+            raise ValueError("Estructura de datos inválida desde Firebase")
+
+        # Actualizar caché
+        st.session_state.inventario_cache = inventario_data
+        st.session_state.ventas_cache = ventas_data
+        st.session_state.last_firebase_update = time.time()
+
         return {
-            "inventario": inventario_data if inventario_data is not None else {},
-            "ventas": ventas_data if ventas_data is not None else []
+            "inventario": inventario_data,
+            "ventas": ventas_data
         }
     except Exception as e:
-        st.warning(f"No se pudo conectar a Firebase o leer datos. Usando datos iniciales. Detalles: {str(e)}")
-        return cargar_datos_iniciales()
+        st.warning(f"Error obteniendo datos: {str(e)}. Usando caché o datos iniciales.")
+        return {
+            "inventario": st.session_state.get('inventario_cache', cargar_datos_iniciales()["inventario"]),
+            "ventas": st.session_state.get('ventas_cache', [])
+        }
 
 def guardar_venta(venta):
-    """Guarda una venta en Firebase."""
+    """Guarda una venta con validación y manejo de errores mejorado"""
+    if not validar_venta(venta):
+        st.error("La estructura de la venta no es válida")
+        return False
+
     try:
         ref = db.reference('/ventas')
-        ventas = ref.get() or [] # Obtener la lista actual, o una lista vacía si no existe
-        ventas.append(venta)
-        ref.set(ventas)
-        return True
+        with st.spinner("Guardando venta..."):
+            # Transacción atómica
+            ventas = ref.get() or []
+            ventas.append(venta)
+            ref.set(ventas)
+            
+            # Actualizar caché local
+            if 'ventas_cache' in st.session_state:
+                st.session_state.ventas_cache.append(venta)
+            
+            st.toast("Venta registrada exitosamente", icon="✅")
+            return True
     except Exception as e:
-        st.error(f"Error guardando venta en Firebase: {str(e)}")
+        st.error(f"Error guardando venta: {str(e)}")
         return False
 
 def actualizar_stock(categoria, producto, cantidad):
-    """
-    Actualiza el stock de un producto en Firebase usando una transacción para asegurar atomicidad.
-    Cantidad puede ser positiva (sumar) o negativa (restar).
-    """
+    """Actualiza stock con transacción y validación"""
     try:
         ref = db.reference(f'/inventario/{categoria}/{producto}/stock')
-        # Usar una transacción para evitar race conditions al actualizar stock
-        result = ref.transaction(lambda current: (current or 0) - cantidad)
-        if result[0]: # result[0] es True si la transacción se completó exitosamente
+        
+        # Transacción atómica con validación
+        def update_transaction(current):
+            current = current or 0
+            new_value = current - cantidad
+            if new_value < 0:
+                return None  # Abortar transacción
+            return new_value
+
+        success, new_value = ref.transaction(update_transaction)
+        
+        if success:
+            # Actualizar caché local
+            if 'inventario_cache' in st.session_state:
+                if (categoria in st.session_state.inventario_cache and 
+                    producto in st.session_state.inventario_cache[categoria]):
+                    st.session_state.inventario_cache[categoria][producto]['stock'] = new_value
             return True
         else:
-            st.error(f"Error en la transacción de stock para {producto}. Posible conflicto de datos.")
+            st.error("No hay suficiente stock disponible")
             return False
     except Exception as e:
-        st.error(f"Error actualizando stock en Firebase para {producto}: {str(e)}")
+        st.error(f"Error actualizando stock: {str(e)}")
         return False
 
-# --- Interfaz Streamlit ---
+# --- Funciones de Validación Mejoradas ---
+def validar_producto(producto):
+    """Valida la estructura completa de un producto"""
+    required_keys = ['precio', 'stock', 'costo']
+    return (isinstance(producto, dict) and
+            all(key in producto for key in required_keys) and
+            isinstance(producto['precio'], (int, float)) and
+            isinstance(producto['costo'], (int, float)) and
+            isinstance(producto['stock'], int) and
+            producto['precio'] >= 0 and
+            producto['costo'] >= 0 and
+            producto['stock'] >= 0)
+
+def validar_venta(venta):
+    """Valida la estructura completa de una venta"""
+    required_keys = ['fecha', 'productos', 'total', 'metodo_pago']
+    if not (isinstance(venta, dict) and all(key in venta for key in required_keys)):
+        return False
+    
+    if not (isinstance(venta['total'], (int, float)) and venta['total'] >= 0):
+        return False
+        
+    if not (isinstance(venta['productos'], dict) and len(venta['productos']) > 0):
+        return False
+        
+    for producto, detalles in venta['productos'].items():
+        required_detalles = ['cantidad', 'precio', 'categoria']
+        if not (isinstance(detalles, dict) and all(key in detalles for key in required_detalles)):
+            return False
+            
+    return True
+
+# --- Interfaz Streamlit Mejorada ---
 def main():
-    """Función principal de la aplicación Streamlit."""
+    """Función principal con inicialización robusta"""
     st.set_page_config(
         page_title="SweetBakery POS",
         page_icon="🍰",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
 
-    # 1. INICIALIZACIÓN ROBUSTA DEL ESTADO DE LA SESIÓN
-    # Inicializa todas las claves necesarias en st.session_state
-    if "firebase_initialized" not in st.session_state:
-        st.session_state.firebase_initialized = False
-    if "inventario" not in st.session_state:
-        st.session_state.inventario = {}
-    if "ventas" not in st.session_state:
-        st.session_state.ventas = []
-    if "carrito" not in st.session_state:
-        st.session_state.carrito = {}
-    if "metodo_pago" not in st.session_state:
-        st.session_state.metodo_pago = "Efectivo"
-    if "last_firebase_sync" not in st.session_state:
-        st.session_state.last_firebase_sync = 0 # Usar un nombre más específico
+    # --- Inicialización del Estado Mejorada ---
+    default_state = {
+        "inventario": {},
+        "ventas": [],
+        "carrito": {},
+        "metodo_pago": "Efectivo",
+        "firebase_initialized": False,
+        "inventario_cache": None,
+        "ventas_cache": None,
+        "last_firebase_update": 0,
+        "last_ui_update": time.time(),
+        "selected_category": None
+    }
 
-    # 2. CONEXIÓN Y SINCRONIZACIÓN CON FIREBASE
-    # Asegura que Firebase se inicialice una sola vez por sesión
+    for key, value in default_state.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    # --- Conexión Firebase Mejorada ---
     if not st.session_state.firebase_initialized:
-        with st.spinner("Conectando a Firebase..."):
+        with st.spinner("Inicializando sistema..."):
             if initialize_firebase():
                 st.session_state.firebase_initialized = True
-                # Una vez inicializado, carga los datos por primera vez
                 firebase_data = get_firebase_data()
-                st.session_state.inventario = firebase_data.get("inventario", {})
-                st.session_state.ventas = firebase_data.get("ventas", [])
-                st.session_state.last_firebase_sync = time.time()
-                st.success("Conexión a Firebase establecida.")
+                st.session_state.inventario = firebase_data["inventario"]
+                st.session_state.ventas = firebase_data["ventas"]
+                st.toast("Conexión con Firebase establecida", icon="✅")
             else:
-                st.error("Error crítico: No se pudo conectar a Firebase. La aplicación podría funcionar con datos de prueba.")
-                # Si falla, carga datos iniciales como fallback
-                initial_fallback_data = cargar_datos_iniciales()
-                st.session_state.inventario = initial_fallback_data["inventario"]
-                st.session_state.ventas = initial_fallback_data["ventas"]
-                st.session_state.firebase_initialized = False # Indicar que no se pudo inicializar completamente
-                # No se detiene la app, para que el usuario pueda usarla con datos de prueba
-    
-    # 3. ACTUALIZACIÓN PERIÓDICA DE DATOS DESDE FIREBASE (solo si Firebase se inicializó con éxito)
-    if st.session_state.firebase_initialized and (time.time() - st.session_state.last_firebase_sync > 30):
-        try:
-            with st.spinner("Sincronizando datos desde Firebase..."):
-                firebase_data = get_firebase_data()
-                if firebase_data:
-                    st.session_state.inventario = firebase_data.get("inventario", {})
-                    st.session_state.ventas = firebase_data.get("ventas", [])
-                    st.session_state.last_firebase_sync = time.time()
-                    # st.info("Datos actualizados desde Firebase.") # Descomentar para depuración
-        except Exception as e:
-            st.error(f"Error durante la sincronización periódica con Firebase: {str(e)}")
-            st.session_state.firebase_initialized = False # Marcar como no inicializado para reintentar o usar fallback
+                initial_data = cargar_datos_iniciales()
+                st.session_state.inventario = initial_data["inventario"]
+                st.session_state.ventas = initial_data["ventas"]
+                st.toast("Modo offline - Usando datos locales", icon="⚠️")
 
-    # Sidebar principal
+    # --- Actualización Periódica Mejorada ---
+    if st.session_state.firebase_initialized and (time.time() - st.session_state.last_firebase_update > 30):
+        with st.spinner("Sincronizando datos..."):
+            firebase_data = get_firebase_data()
+            st.session_state.inventario = firebase_data["inventario"]
+            st.session_state.ventas = firebase_data["ventas"]
+            st.session_state.last_firebase_update = time.time()
+
+    # --- UI Principal ---
+    mostrar_estado_conexion()
+    
     st.sidebar.title("🍰 SweetBakery POS")
+    menu_options = ["Punto de Venta", "Gestión de Inventario", "Reportes"]
     opcion = st.sidebar.radio(
         "Menú Principal",
-        ["Punto de Venta", "Gestión de Inventario", "Reportes"],
-        horizontal=False # Vertical es mejor para sidebar
+        menu_options,
+        index=0
     )
-    
-    # Navegación entre páginas
+
     if opcion == "Punto de Venta":
         mostrar_punto_venta()
     elif opcion == "Gestión de Inventario":
@@ -266,21 +339,38 @@ def main():
     elif opcion == "Reportes":
         mostrar_reportes()
 
-# --- Punto de Venta Mejorado ---
+# --- Componentes UI Mejorados ---
+def mostrar_estado_conexion():
+    """Muestra el estado de conexión en el sidebar"""
+    status_container = st.sidebar.container()
+    
+    if st.session_state.firebase_initialized:
+        last_update = datetime.fromtimestamp(st.session_state.last_firebase_update).strftime('%H:%M:%S')
+        status_container.success(f"✅ Conectado\nÚltima sincronización: {last_update}")
+    else:
+        status_container.warning("⚠️ Modo offline\nUsando datos locales")
+    
+    status_container.progress(min(100, (time.time() - st.session_state.last_firebase_update) / 30 * 100))
+
 def mostrar_punto_venta():
-    """Interfaz del punto de venta."""
+    """Interfaz del punto de venta mejorada"""
     st.header("🛒 Punto de Venta")
 
-    # Búsqueda y método de pago
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        busqueda = st.text_input("🔍 Buscar producto", placeholder="Nombre del producto...", key="pv_busqueda")
-    with col2:
-        st.session_state.metodo_pago = st.selectbox(
-            "Método de Pago",
-            ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
-            key="pv_metodo_pago_select"
-        )
+    # Búsqueda y selección de método de pago
+    with st.container():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            busqueda = st.text_input(
+                "🔍 Buscar producto",
+                placeholder="Nombre del producto...",
+                key="pv_busqueda"
+            )
+        with col2:
+            st.session_state.metodo_pago = st.selectbox(
+                "Método de Pago",
+                ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
+                key="pv_metodo_pago"
+            )
 
     # Mostrar productos por categoría
     for categoria, productos in st.session_state.inventario.items():
@@ -296,13 +386,20 @@ def mostrar_punto_venta():
                 with cols[col_idx]:
                     card = st.container(border=True)
                     card.markdown(f"**{producto}**")
-                    card.markdown(f"💵 Precio: ${datos['precio']:.2f}")
-
-                    # Mostrar estado del stock
+                    
+                    # Mostrar precio y stock
+                    card.markdown(f"💵 **Precio:** ${datos['precio']:.2f}")
+                    
                     if datos['stock'] > 0:
-                        card.markdown(f"🟢 Disponible ({datos['stock']})")
+                        stock_text = f"🟢 **Stock:** {datos['stock']}"
+                        if datos['stock'] < 3:
+                            stock_text += " (¡Últimas unidades!)"
+                            card.warning(stock_text)
+                        else:
+                            card.success(stock_text)
+                        
+                        # Botón para añadir al carrito
                         if card.button("➕ Añadir", key=f"add_{producto}", use_container_width=True):
-                            # Verificar si hay suficiente stock antes de añadir al carrito
                             if st.session_state.inventario[categoria][producto]['stock'] > 0:
                                 if producto in st.session_state.carrito:
                                     st.session_state.carrito[producto]['cantidad'] += 1
@@ -311,27 +408,29 @@ def mostrar_punto_venta():
                                         'cantidad': 1,
                                         'precio': datos['precio'],
                                         'categoria': categoria,
-                                        'costo': datos.get('costo', 0) # Asegurar que el costo esté en el carrito
+                                        'costo': datos.get('costo', 0)
                                     }
-                                if not actualizar_stock(categoria, producto, 1): # Reducir stock en DB
-                                    st.error("No se pudo actualizar el stock en la base de datos.")
-                                st.rerun() # Forzar rerun para actualizar el estado visual
+                                
+                                if actualizar_stock(categoria, producto, 1):
+                                    st.rerun()
+                                else:
+                                    # Revertir cambios si falla la actualización
+                                    if producto in st.session_state.carrito:
+                                        if st.session_state.carrito[producto]['cantidad'] <= 1:
+                                            del st.session_state.carrito[producto]
+                                        else:
+                                            st.session_state.carrito[producto]['cantidad'] -= 1
                             else:
                                 st.warning(f"¡{producto} está agotado!")
                     else:
-                        card.markdown("🔴 Agotado")
-                        # --- FIX: Añadir un 'key' único aquí ---
-                        card.button("❌ Agotado", disabled=True, use_container_width=True, key=f"disabled_agotado_{producto}")
-
-                    # Alerta para stock bajo
-                    if 0 < datos['stock'] < 3:
-                        card.warning(f"¡Últimas {datos['stock']} unidades!")
+                        card.error("🔴 Agotado")
+                        card.button("❌ Agotado", disabled=True, key=f"disabled_{producto}", use_container_width=True)
 
                 col_idx = (col_idx + 1) % 3
     
     # Mostrar carrito de compras en el sidebar
-    if st.session_state.carrito:
-        with st.sidebar:
+    with st.sidebar:
+        if st.session_state.carrito:
             st.header("📋 Factura Actual")
             total = 0
             productos_a_eliminar = []
@@ -346,39 +445,37 @@ def mostrar_punto_venta():
                 if col3.button("❌", key=f"del_{producto}"):
                     productos_a_eliminar.append(producto)
             
-            # Eliminar productos del carrito y reponer stock
+            # Procesar eliminación de productos
             for producto in productos_a_eliminar:
                 item = st.session_state.carrito[producto]
-                # Aumentar stock en DB
-                if actualizar_stock(item['categoria'], producto, -item['cantidad']): 
+                if actualizar_stock(item['categoria'], producto, -item['cantidad']):
                     del st.session_state.carrito[producto]
-                    st.rerun() # Forzar rerun
+                    st.rerun()
                 else:
-                    st.error(f"No se pudo reponer el stock para {producto}.")
+                    st.error(f"No se pudo reponer stock para {producto}")
             
             st.divider()
-            st.markdown(f"**Total a Pagar:** ${total:,.2f}") # Formato con coma para miles
+            st.markdown(f"**Total a Pagar:** ${total:,.2f}")
             
             if st.button("✅ Finalizar Venta", type="primary", use_container_width=True):
                 if not st.session_state.carrito:
-                    st.warning("El carrito está vacío. Añade productos para finalizar una venta.")
+                    st.warning("El carrito está vacío")
                     return
                     
                 venta = {
                     'fecha': datetime.now().isoformat(),
-                    'productos': st.session_state.carrito.copy(), # Guardar una copia del carrito
+                    'productos': st.session_state.carrito.copy(),
                     'total': total,
                     'metodo_pago': st.session_state.metodo_pago
                 }
                 
                 if guardar_venta(venta):
-                    st.session_state.carrito = {} # Limpiar carrito después de la venta
+                    st.session_state.carrito = {}
                     st.success("Venta registrada exitosamente!")
-                    time.sleep(1) # Pequeña pausa para que el usuario vea el mensaje
-                    st.rerun() # Forzar rerun para limpiar el carrito y actualizar datos
-
-    else:
-        st.sidebar.info("🛒 El carrito está vacío. Añade productos para comenzar.")
+                    time.sleep(1)
+                    st.rerun()
+        else:
+            st.info("🛒 El carrito está vacío. Añade productos para comenzar.")
 
 
 def mostrar_inventario():
