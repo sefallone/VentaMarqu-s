@@ -64,8 +64,7 @@ def initialize_firebase():
     try:
         # Verificar si ya hay una app inicializada
         if firebase_admin._apps:
-            app = firebase_admin.get_app('https://ventasmarques.streamlit.app/
-')
+            app = firebase_admin.get_app('arteparisdelicafe')
             st.session_state.firebase_initialized = True
             return True
             
