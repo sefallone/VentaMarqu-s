@@ -60,15 +60,18 @@ def firebase_operation_with_retry(func):
 # FUNCIONES FIREBASE
 # ======================
 def initialize_firebase():
-    """Inicialización robusta de Firebase con validación mejorada"""
-    if st.session_state.get('firebase_initialized', False):
-        return True
-        
-    if not st.secrets.get('firebase'):
-        st.error("Configuración de Firebase no encontrada en secrets")
-        return False
-
+    """Inicialización robusta de Firebase con manejo de instancias existentes"""
     try:
+        # Verificar si ya hay una app inicializada
+        if firebase_admin._apps:
+            app = firebase_admin.get_app('SweetBakeryPOS')
+            st.session_state.firebase_initialized = True
+            return True
+            
+        if not st.secrets.get('firebase'):
+            st.error("Configuración de Firebase no encontrada en secrets")
+            return False
+
         # Validación mejorada de credenciales
         required_config = {
             "type": "service_account",
@@ -101,30 +104,21 @@ def initialize_firebase():
             "private_key": private_key
         }
 
-        # Validación de certificado
+        # Inicialización con nombre de app específico
         cred = credentials.Certificate(firebase_config)
-        
-        # Configuración con timeout explícito
         firebase_admin.initialize_app(cred, {
             'databaseURL': st.secrets.firebase.databaseURL,
             'name': 'SweetBakeryPOS',
             'options': {'httpTimeout': FIREBASE_TIMEOUT}
         })
 
-        # Prueba de conexión robusta
+        # Prueba de conexión
         test_ref = db.reference('/connection_test')
         test_ref.set({'timestamp': datetime.now().isoformat()}, timeout=5)
         test_ref.delete()
         
-        # Iniciar hilo de monitoreo de conexión
-        if not st.session_state.get('monitor_thread_running', False):
-            threading.Thread(target=monitor_connection, daemon=True).start()
-            st.session_state.monitor_thread_running = True
-        
         st.session_state.firebase_initialized = True
         st.session_state.last_connection_check = time.time()
-        st.session_state.firebase_attempts = 0
-        st.session_state.next_retry_time = None
         st.toast("✅ Conexión a Firebase establecida", icon="✅")
         return True
         
@@ -135,26 +129,30 @@ def initialize_firebase():
                 firebase_admin.delete_app(firebase_admin.get_app('SweetBakeryPOS'))
             except:
                 pass
+        st.session_state.firebase_initialized = False
         return False
-
 def monitor_connection():
     """Monitorea la conexión periódicamente"""
     while True:
-        time.sleep(30)  # Verificar cada 30 segundos
+        time.sleep(30)
         
         if not st.session_state.get('firebase_initialized', False):
             continue
             
         try:
-            # Prueba liviana de conexión
-            test_ref = db.reference('/connection_test')
+            app = firebase_admin.get_app('SweetBakeryPOS')
+            test_ref = db.reference('/connection_test', app=app)
             test_ref.set({'heartbeat': datetime.now().isoformat()}, timeout=5)
             test_ref.delete()
             st.session_state.last_connection_check = time.time()
         except Exception as e:
             st.session_state.firebase_initialized = False
             st.warning(f"⚠️ Se perdió la conexión con Firebase. Error: {str(e)}")
-            initialize_firebase()  # Intentar reconectar
+            try:
+                firebase_admin.delete_app(firebase_admin.get_app('SweetBakeryPOS'))
+            except:
+                pass
+            initialize_firebase()
 
 @firebase_operation_with_retry
 def get_firebase_data():
