@@ -70,7 +70,7 @@ def initialize_firebase():
     try:
         # Verificar si ya hay una app inicializada
         if firebase_admin._apps:
-            app = firebase_admin.get_app('arteparisdelicafe')
+            app = firebase_admin.get_app('FIREBASE_APP_NAME')
             st.session_state.firebase_initialized = True
             return True
             
@@ -132,7 +132,7 @@ def initialize_firebase():
         st.error(f"Error crítico inicializando Firebase: {str(e)}")
         if 'firebase_admin._apps' in locals():
             try:
-                firebase_admin.delete_app(firebase_admin.get_app('arteparisdelicafe'))
+                firebase_admin.delete_app(firebase_admin.get_app('FIREBASE_APP_NAME'))
             except:
                 pass
         st.session_state.firebase_initialized = False
@@ -146,7 +146,7 @@ def monitor_connection():
             continue
             
         try:
-            app = firebase_admin.get_app('arteparisdelicafe')
+            app = firebase_admin.get_app('FIREBASE_APP_NAME')
             test_ref = db.reference('/connection_test', app=app)
             test_ref.set({'heartbeat': datetime.now().isoformat()}, timeout=5)
             test_ref.delete()
@@ -155,7 +155,7 @@ def monitor_connection():
             st.session_state.firebase_initialized = False
             st.warning(f"⚠️ Se perdió la conexión con Firebase. Error: {str(e)}")
             try:
-                firebase_admin.delete_app(firebase_admin.get_app('arteparisdelicafe'))
+                firebase_admin.delete_app(firebase_admin.get_app('FIREBASE_APP_NAME'))
             except:
                 pass
             initialize_firebase()
