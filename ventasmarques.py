@@ -61,82 +61,68 @@ def firebase_operation_with_retry(func):
 # ======================
 
 # Configuración global
-FIREBASE_APP_NAME = 'arteparisdelicafe'  # Nombre consistente para la aplicación
-FIREBASE_TIMEOUT = 10  # segundos
-
+APP_NAME = "SweetBakeryPOS"  # Nombre real de la aplicación, sin comillas en FIREBASE_APP_NAME
 
 def initialize_firebase():
-    """Inicialización robusta de Firebase con manejo de instancias existentes"""
+    """Inicialización robusta de Firebase con manejo completo de errores"""
     try:
-        # Verificar si ya hay una app inicializada
-        if firebase_admin._apps:
-            app = firebase_admin.get_app('FIREBASE_APP_NAME')
+        # 1. Verificar si ya está inicializada
+        try:
+            existing_app = firebase_admin.get_app(APP_NAME)
             st.session_state.firebase_initialized = True
             return True
-            
-        if not st.secrets.get('firebase'):
-            st.error("Configuración de Firebase no encontrada en secrets")
+        except ValueError:
+            pass  # No existe, continuamos con la inicialización
+
+        # 2. Validar secrets
+        if not hasattr(st, 'secrets') or not st.secrets.get("firebase"):
+            st.error("Configuración de Firebase no encontrada")
             return False
 
-        # Validación mejorada de credenciales
-        required_config = {
-            "type": "service_account",
-            "project_id": str,
-            "private_key_id": str,
-            "private_key": str,
-            "client_email": str,
-            "client_id": str,
-            "auth_uri": str,
-            "token_uri": str,
-            "auth_provider_x509_cert_url": str,
-            "client_x509_cert_url": str,
-            "databaseURL": str
-        }
-
-        missing_keys = [key for key in required_config if key not in st.secrets.firebase]
-        if missing_keys:
-            st.error(f"Configuración faltante: {', '.join(missing_keys)}")
-            return False
-
-        # Formateo automático de clave privada
-        private_key = st.secrets.firebase.private_key.strip()
-        if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
-            private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
-        if not private_key.endswith("-----END PRIVATE KEY-----"):
-            private_key = private_key + "\n-----END PRIVATE KEY-----"
-
+        # 3. Configurar credenciales
         firebase_config = {
-            **{k: st.secrets.firebase[k] for k in required_config if k != "databaseURL"},
-            "private_key": private_key
+            "type": st.secrets.firebase.type,
+            "project_id": st.secrets.firebase.project_id,
+            "private_key_id": st.secrets.firebase.private_key_id,
+            "private_key": st.secrets.firebase.private_key.replace('\\n', '\n'),
+            "client_email": st.secrets.firebase.client_email,
+            "client_id": st.secrets.firebase.client_id,
+            "auth_uri": st.secrets.firebase.auth_uri,
+            "token_uri": st.secrets.firebase.token_uri,
+            "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
+            "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
         }
 
-        # Inicialización con nombre de app específico
+        # 4. Inicializar la aplicación con nombre explícito
         cred = credentials.Certificate(firebase_config)
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': st.secrets.firebase.databaseURL,
-            'name': 'SweetBakeryPOS',
-            'options': {'httpTimeout': FIREBASE_TIMEOUT}
-        })
+        firebase_admin.initialize_app(
+            cred,
+            {
+                'databaseURL': st.secrets.firebase.databaseURL,
+                'name': APP_NAME  # Usamos la constante definida
+            }
+        )
 
-        # Prueba de conexión
-        test_ref = db.reference('/connection_test')
-        test_ref.set({'timestamp': datetime.now().isoformat()}, timeout=5)
+        # 5. Probar la conexión
+        test_ref = db.reference('/connection_test', app=firebase_admin.get_app(APP_NAME))
+        test_ref.set({'timestamp': datetime.now().isoformat()})
         test_ref.delete()
-        
+
         st.session_state.firebase_initialized = True
-        st.session_state.last_connection_check = time.time()
-        st.toast("✅ Conexión a Firebase establecida", icon="✅")
+        st.success("Firebase inicializado correctamente")
         return True
-        
+
     except Exception as e:
-        st.error(f"Error crítico inicializando Firebase: {str(e)}")
-        if 'firebase_admin._apps' in locals():
-            try:
-                firebase_admin.delete_app(firebase_admin.get_app('FIREBASE_APP_NAME'))
-            except:
-                pass
+        st.error(f"Error inicializando Firebase: {str(e)}")
+        # Limpiar en caso de error
+        try:
+            firebase_admin.delete_app(firebase_admin.get_app(APP_NAME))
+        except:
+            pass
         st.session_state.firebase_initialized = False
         return False
+
+
 def monitor_connection():
     """Monitorea la conexión periódicamente"""
     while True:
