@@ -258,7 +258,7 @@ def validar_producto(producto):
 def validar_venta(venta):
     """Valida la estructura completa de una venta"""
     required_keys = ['fecha', 'productos', 'total', 'metodo_pago']
-    if not (isinstance(venta, dict) and all(key in venta for key in required_keys):
+    if not (isinstance(venta, dict) and all(key in venta for key in required_keys)):
         return False
     
     if not (isinstance(venta['total'], (int, float)) or venta['total'] < 0:
