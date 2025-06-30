@@ -11,30 +11,47 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-# --- Configuración Firebase Mejorada ---
 def initialize_firebase():
-    """Inicializa la conexión con Firebase"""
     if not firebase_admin._apps:
         try:
-            # Obtener configuración desde secrets.toml
+            # Obtener la clave privada y asegurar el formato correcto
+            private_key = st.secrets.firebase.private_key
+            
+            # Verificar que la clave comienza y termina correctamente
+            if not private_key.startswith("-----BEGIN PRIVATE KEY-----"):
+                private_key = "-----BEGIN PRIVATE KEY-----\n" + private_key
+            if not private_key.endswith("-----END PRIVATE KEY-----"):
+                private_key = private_key + "\n-----END PRIVATE KEY-----"
+            
+            # Reemplazar dobles barras invertidas si existen
+            private_key = private_key.replace('\\n', '\n')
+            
             firebase_config = {
-                "type": st.secrets["firebase"]["type"],
-                "project_id": st.secrets["firebase"]["project_id"],
-                "private_key_id": st.secrets["firebase"]["private_key_id"],
-                "private_key": st.secrets["firebase"]["private_key"].replace('\\n', '\n'),
-                "client_email": st.secrets["firebase"]["client_email"],
-                "client_id": st.secrets["firebase"]["client_id"],
-                "auth_uri": st.secrets["firebase"]["auth_uri"],
-                "token_uri": st.secrets["firebase"]["token_uri"],
-                "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
-                "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"]
+                "type": st.secrets.firebase.type,
+                "project_id": st.secrets.firebase.project_id,
+                "private_key_id": st.secrets.firebase.private_key_id,
+                "private_key": private_key,
+                "client_email": st.secrets.firebase.client_email,
+                "client_id": st.secrets.firebase.client_id,
+                "auth_uri": st.secrets.firebase.auth_uri,
+                "token_uri": st.secrets.firebase.token_uri,
+                "auth_provider_x509_cert_url": st.secrets.firebase.auth_provider_x509_cert_url,
+                "client_x509_cert_url": st.secrets.firebase.client_x509_cert_url
             }
             
-            # Inicializar Firebase con nombre específico
+            # Verificar la configuración antes de inicializar
+            required_keys = ["type", "project_id", "private_key_id", "private_key",
+                            "client_email", "client_id", "auth_uri", "token_uri",
+                            "auth_provider_x509_cert_url", "client_x509_cert_url"]
+            
+            for key in required_keys:
+                if not firebase_config.get(key):
+                    st.error(f"Falta configuración requerida: {key}")
+                    return False
+            
             cred = credentials.Certificate(firebase_config)
             firebase_admin.initialize_app(cred, {
-                'databaseURL': st.secrets["firebase"]["databaseURL"],
-                'name': 'SweetBakeryApp'
+                'databaseURL': st.secrets.firebase.databaseURL
             })
             return True
         except Exception as e:
