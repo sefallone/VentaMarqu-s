@@ -261,10 +261,10 @@ def validar_venta(venta):
     if not (isinstance(venta, dict) and all(key in venta for key in required_keys)):
         return False
     
-    if not (isinstance(venta['total'], (int, float)) or venta['total'] < 0:
+    if not (isinstance(venta['total'], (int, float)) or venta['total']) < 0:
         return False
         
-    if not (isinstance(venta['productos'], dict) or len(venta['productos']) == 0:
+    if not (isinstance(venta['productos'], dict) or len(venta['productos'])) == 0:
         return False
         
     for producto, detalles in venta['productos'].items():
