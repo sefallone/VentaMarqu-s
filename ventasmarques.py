@@ -270,7 +270,7 @@ def main():
 def mostrar_punto_venta():
     """Interfaz del punto de venta."""
     st.header("🛒 Punto de Venta")
-    
+
     # Búsqueda y método de pago
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -281,23 +281,23 @@ def mostrar_punto_venta():
             ["Efectivo", "Tarjeta Débito", "Tarjeta Crédito", "Transferencia"],
             key="pv_metodo_pago_select"
         )
-    
+
     # Mostrar productos por categoría
     for categoria, productos in st.session_state.inventario.items():
         with st.expander(f"📦 {categoria}", expanded=True):
             cols = st.columns(3)
             col_idx = 0
-            
+
             for producto, datos in productos.items():
                 # Filtrar por búsqueda
                 if busqueda.lower() not in producto.lower():
                     continue
-                    
+
                 with cols[col_idx]:
                     card = st.container(border=True)
                     card.markdown(f"**{producto}**")
                     card.markdown(f"💵 Precio: ${datos['precio']:.2f}")
-                    
+
                     # Mostrar estado del stock
                     if datos['stock'] > 0:
                         card.markdown(f"🟢 Disponible ({datos['stock']})")
@@ -320,12 +320,13 @@ def mostrar_punto_venta():
                                 st.warning(f"¡{producto} está agotado!")
                     else:
                         card.markdown("🔴 Agotado")
-                        card.button("❌ Agotado", disabled=True, use_container_width=True)
-                        
+                        # --- FIX: Añadir un 'key' único aquí ---
+                        card.button("❌ Agotado", disabled=True, use_container_width=True, key=f"disabled_agotado_{producto}")
+
                     # Alerta para stock bajo
                     if 0 < datos['stock'] < 3:
                         card.warning(f"¡Últimas {datos['stock']} unidades!")
-                
+
                 col_idx = (col_idx + 1) % 3
     
     # Mostrar carrito de compras en el sidebar
