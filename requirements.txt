@@ -7,3 +7,4 @@ openpyxl
 seaborn
 plotly.express
 reportlab
+st_aggrid 
