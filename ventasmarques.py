@@ -11,7 +11,7 @@ def initialize_firebase():
     except ValueError:
         cred = credentials.Certificate("serviceAccountKey.json")
         firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://tu-proyecto.firebaseio.com/'
+            'databaseURL': 'https://arte-paris-api-default-rtdb.firebaseio.com/'
         })
 
 initialize_firebase()
@@ -19,12 +19,75 @@ initialize_firebase()
 # Estructura de datos inicial (ejemplo reducido)
 initial_data = {
     "Pastelería": {
-        "Dulce Tres Leche (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
-        "Milhojas Arequipe (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15}
-    },
-    "Hojaldre": {
-        "Hojaldre de Pollo": {"precio": 3.50, "stock": 2, "costo": 1.75}
-    }
+                "Dulce Tres Leche (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
+                "Milhojas Arequipe (porción)": {"precio": 4.30, "stock": 0, "costo": 2.15},
+                "Mousse de Chocolate (porción)": {"precio": 4.80, "stock": 0, "costo": 2.40},
+                "Mousse de Parchita (porción)": {"precio": 3.70, "stock": 1, "costo": 1.85},
+                "Ópera (porción)": {"precio": 3.70, "stock": 2 , "costo": 1.85},
+                "Petit Fours (Mini Dulce)": {"precio": 0.80, "stock": 10, "costo": 0.40},
+                "Profiterol (porción)": {"precio": 4.20, "stock": 0, "costo": 2.10},
+                "Sacher (porción)": {"precio": 3, "stock": 0, "costo": 1.5},
+                "Cheesecake Arequipe (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
+                "Cheesecake Fresa (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
+                "Cheesecake Chocolate (porción)": {"precio": 5.40, "stock": 2, "costo": 2.70},
+                "Cheesecake Pistacho (porción)": {"precio": 5.40, "stock": 0, "costo": 2.70},
+                "Selva Negra (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
+                "Tartaleta Limón (porción)": {"precio": 4.30, "stock": 0, "costo": 2.65},
+                "Tartaleta Parchita (porción)": {"precio": 4.30, "stock": 2, "costo": 2.65},
+                "Torta Imposible (porción)": {"precio": 2.50, "stock": 0, "costo": 1.25},
+                "Torta Pan (porción)": {"precio": 2.80, "stock": 0, "costo": 1.40},
+                "Brazo Gitano Limón (porción)": {"precio": 2.20, "stock": 0, "costo": 1.10},
+                "Brazo Gitano Arequipe (porción)": {"precio": 2.20, "stock": 3, "costo": 1.10},
+                "Brazo Gitano Chocolate (porción)": {"precio": 2.20, "stock": 2, "costo": 1.10}
+            },
+            "Hojaldre": {
+                "Hojaldre de Pollo": {"precio": 3.50, "stock": 2, "costo": 1.75},
+                "Hojaldre de Carne": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Hojaldre de Queso": {"precio": 3.00, "stock": 1, "costo": 1.50},
+                "Hojaldre de Jamón": {"precio": 3.00, "stock": 1, "costo": 1.50},
+                "Croissant de Pavo/ Queso Crema": {"precio": 3.50, "stock": 0, "costo": 1.75},
+                "Cachito de Queso": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Cachito de Jamón": {"precio": 3.00, "stock": 2, "costo": 1.50},
+                "Cachito de Pavo/Queso Crema": {"precio": 3.20, "stock": 1, "costo": 1.60},
+                "Croissant": {"precio": 2.60, "stock": 2, "costo": 1.30}
+                                
+            },
+            "Bebidas": {
+                "Café Pequeño": {"precio": 1.30, "stock": 200, "costo": 0.65},
+                "Café Grande": {"precio": 2.60, "stock": 200, "costo": 1.30},
+                "Mocchaccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Cappuccino": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Chocolate Caliente": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Café Arte París": {"precio": 3.50, "stock": 200, "costo": 1.75},
+                "Jugo Naranja": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Fresa": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Jugo Melocoton": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Jugo Guayaba": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Piña": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Lechoza": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Jugo Mora": {"precio": 3, "stock": 200, "costo": 1.50},
+                "Agua Mineral": {"precio": 2, "stock": 8, "costo": 1},
+                "Té caliente": {"precio": 2.00, "stock": 200, "costo": 1.00},
+                "Malta Retornable": {"precio": 1.00, "stock": 11, "costo": 0.50},
+                "Nestea": {"precio": 3.00, "stock": 200, "costo": 1.50},
+                "Refresco Bomba": {"precio": 1.50, "stock": 200, "costo": 0.75},
+                "Flor de Jamaica Frío": {"precio": 2.50, "stock": 200, "costo": 1.25},
+                "Papelón con Limón": {"precio": 2.50, "stock": 200, "costo": 1.25}
+            },
+            "Dulces Secos": {
+                "Mini Dulce Manzana": {"precio": 1.25, "stock": 8, "costo": 0.625},
+                "Mini Croissant Chocolate": {"precio": 0.80, "stock": 2, "costo": 0.40},
+                "Trio Mini Dulces": {"precio": 3.40, "stock": 0, "costo": 1.70},
+                "Trio Mini Croissant": {"precio": 2.20, "stock": 0, "costo": 1.10},
+                "Palmeras": {"precio": 3.20, "stock": 2, "costo": 1.60},
+                "Panque Marmoleado": {"precio": 2.50, "stock": 0, "costo": 1.25},
+                "Hojaldre de Manzana": {"precio": 4, "stock": 2, "costo": 2},
+                "Galletas Arte París Chocolate": {"precio": 2.50, "stock": 5, "costo": 1.25},
+                "Galletas Arte París Avena/Pasas": {"precio": 2.50, "stock": 5, "costo": 1.25},
+                "Ambrosia Chocolate": {"precio": 1.40, "stock": 0, "costo": 0.70},
+                "Ambrosia Frutas Confitadas": {"precio": 1.40, "stock": 0, "costo": 0.70},
+                "Pasta Seca (100 grs)": {"precio": 2.50, "stock": 0, "costo": 1.25}
+            }   
 }
 
 # Función para obtener el inventario
