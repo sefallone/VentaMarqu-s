@@ -1,10 +1,5 @@
-firebase-admin
-streamlit
-pandas
-numpy
-matplotlib
-openpyxl
-seaborn
-plotly.express
-reportlab
-st_aggrid 
+streamlit==1.32.2
+firebase-admin==6.2.0
+pandas==2.1.4
+streamlit-aggrid==0.3.4.post3
+python-dateutil==2.8.2
