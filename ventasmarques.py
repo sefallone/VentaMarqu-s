@@ -2,7 +2,6 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, db
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder
 import json
 from datetime import datetime
 
@@ -105,16 +104,7 @@ def inventory_interface():
     gb.configure_default_column(groupable=True, value=True, enableRowGroup=True, aggFunc='sum', editable=True)
     grid_options = gb.build()
     
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        height=500,
-        width='100%',
-        data_return_mode='AS_INPUT',
-        update_mode='MODEL_CHANGED',
-        fit_columns_on_grid_load=True,
-        allow_unsafe_jscode=True,
-    )
+    edited_df = st.data_editor(df, num_rows="dynamic")
     
     data = grid_response['data']
     edited_rows = grid_response['data'].to_dict('records')
