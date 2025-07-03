@@ -256,7 +256,7 @@ def pos_interface():
             with cols[1]:
                 st.write(f"${item['precio']:.2f} c/u")
             with cols[2]:
-                st.write(f"Cantidad: {item['cantidad']}")
+                st.write(f"Cantidad: {item['cantidad']}") 
             with cols[3]:
                 if st.button("❌", key=f"remove_{i}"):
                     if item['cantidad'] > 1:
