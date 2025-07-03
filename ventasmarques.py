@@ -61,10 +61,9 @@ def firebase_operation_with_retry(func):
 # ======================
 
 # Configuración global
-FIREBASE_APP_NAME = 'SweetBakeryPOS_UniqueAppName'
+FIREBASE_APP_NAME = 'ARTEPARISAPP'
 
 def initialize_firebase():
-    """Inicialización segura de Firebase con manejo de instancias múltiples"""
     try:
         # Verificar si ya está inicializada
         if firebase_admin._apps and FIREBASE_APP_NAME in firebase_admin._apps:
