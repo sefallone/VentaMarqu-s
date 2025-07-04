@@ -9,7 +9,7 @@ def initialize_firebase():
     try:
         firebase_admin.get_app()
     except ValueError:
-        cred = credentials.Certificate("serviceAccountKey.json")
+        cred = credentials.Certificate("arte-paris-api-firebase-adminsdk-fbsvc-0562938c8a.json")
         firebase_admin.initialize_app(cred, {
             'databaseURL': 'https://arte-paris-api-default-rtdb.firebaseio.com/'
         })
