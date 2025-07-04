@@ -6,16 +6,17 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
+from reportlab.pdfgen import canvas  # Importación faltante
+import plotly.express as px  # Importación faltante
 
 # Configuración inicial de la página
 st.set_page_config(
-    page_title="ARTE PARÍS POS", 
+    page_title="SweetBakery POS",  # Nombre corregido para consistencia
     page_icon="🍰", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- BASE DE DATOS ---
 # --- BASE DE DATOS ---
 def inicializar_datos():
     """Inicializa los datos en session_state si no existen"""
