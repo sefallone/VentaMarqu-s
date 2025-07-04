@@ -121,13 +121,25 @@ def buscar_productos(termino):
     return resultados
 
 def agregar_al_carrito(producto, cantidad, categoria):
-    """Agrega un producto al carrito de compras"""
+    """Función mejorada para agregar productos al carrito con validación de stock"""
+    stock_disponible = st.session_state.inventario[categoria][producto]["stock"]
+    
+    if stock_disponible <= 0:
+        st.error(f"⚠️ No hay stock disponible de {producto}")
+        return False
+    
+    if cantidad > stock_disponible:
+        st.error(f"⚠️ Solo hay {stock_disponible} unidades disponibles de {producto}")
+        return False
+    
     if producto in st.session_state.carrito:
-        st.session_state.carrito[producto]["cantidad"] += cantidad
-        st.session_state.carrito[producto]["subtotal"] = (
-            st.session_state.carrito[producto]["cantidad"] * 
-            st.session_state.carrito[producto]["precio"]
-        )
+        nueva_cantidad = st.session_state.carrito[producto]["cantidad"] + cantidad
+        if nueva_cantidad > stock_disponible:
+            st.error(f"⚠️ No puedes agregar {cantidad} más. Máximo disponible: {stock_disponible - st.session_state.carrito[producto]['cantidad']}")
+            return False
+        
+        st.session_state.carrito[producto]["cantidad"] = nueva_cantidad
+        st.session_state.carrito[producto]["subtotal"] = nueva_cantidad * st.session_state.carrito[producto]["precio"]
     else:
         st.session_state.carrito[producto] = {
             "cantidad": cantidad,
@@ -135,6 +147,8 @@ def agregar_al_carrito(producto, cantidad, categoria):
             "categoria": categoria,
             "subtotal": cantidad * st.session_state.inventario[categoria][producto]["precio"]
         }
+    
+    return True
 
 def finalizar_venta(cliente, metodo_pago):
     """Registra la venta y actualiza el inventario"""
@@ -262,8 +276,9 @@ def mostrar_estadisticas():
         st.plotly_chart(fig2, use_container_width=True)
 
 # --- INTERFAZ DE USUARIO ---
+
 def mostrar_interfaz_ventas():
-    """Interfaz mejorada para el proceso de ventas"""
+    """Interfaz mejorada para el proceso de ventas con manejo de stock cero"""
     st.header("🛒 Punto de Venta - SweetBakery")
     
     # Barra de búsqueda mejorada
@@ -307,25 +322,37 @@ def mostrar_interfaz_ventas():
             for idx, item in enumerate(resultados):
                 with cols[col_index]:
                     with st.container(border=True):
-                        st.markdown(f"**{item['Imagen']} {item['Producto']}**")
-                        st.markdown(f"💵 **Precio:** ${item['Precio']:.2f}")
-                        st.markdown(f"📦 **Stock:** {item['Stock']}")
-                        
-                        # Botón para agregar con cantidad
-                        cantidad = st.number_input(
-                            "Cantidad:",
-                            min_value=1,
-                            max_value=item['Stock'],
-                            value=1,
-                            key=f"cant_{item['Producto']}",
-                            label_visibility="collapsed"
+                        # Cambiar color del borde si stock es cero
+                        border_color = "#FF4B4B" if item['Stock'] == 0 else "#E0E0E0"
+                        st.markdown(
+                            f"""<div style='border: 2px solid {border_color}; border-radius: 5px; padding: 10px;'>
+                            <p style='margin-bottom: 5px;'><strong>{item['Imagen']} {item['Producto']}</strong></p>
+                            <p style='margin-bottom: 5px;'>💵 <strong>Precio:</strong> ${item['Precio']:.2f}</p>
+                            <p style='margin-bottom: 10px;'>📦 <strong>Stock:</strong> {item['Stock']}</p>
+                            </div>""", 
+                            unsafe_allow_html=True
                         )
                         
-                        if st.button("➕ Agregar", 
-                                   key=f"add_{item['Producto']}",
-                                   use_container_width=True):
-                            agregar_al_carrito(item['Producto'], cantidad, item['Categoría'])
-                            st.toast(f"✅ {cantidad} x {item['Producto']} agregado!")
+                        # Mostrar mensaje si no hay stock
+                        if item['Stock'] == 0:
+                            st.error("Agotado", icon="⛔")
+                        else:
+                            # Botón para agregar con cantidad
+                            cantidad = st.number_input(
+                                "Cantidad:",
+                                min_value=1,
+                                max_value=item['Stock'],
+                                value=1,
+                                key=f"cant_{item['Producto']}",
+                                label_visibility="collapsed"
+                            )
+                            
+                            if st.button("➕ Agregar", 
+                                       key=f"add_{item['Producto']}",
+                                       use_container_width=True,
+                                       disabled=(item['Stock'] == 0)):
+                                agregar_al_carrito(item['Producto'], cantidad, item['Categoría'])
+                                st.toast(f"✅ {cantidad} x {item['Producto']} agregado!")
                 
                 col_index = (col_index + 1) % 4
                 if col_index == 0 and idx < len(resultados) - 1:
@@ -344,16 +371,21 @@ def mostrar_interfaz_ventas():
                 
                 for idx, (producto, datos) in enumerate(productos.items()):
                     with cols[col_index]:
-                        with st.container(border=True):
-                            # Icono según categoría
-                            icono = "🎂" if categoria == "Pastelería" else \
-                                    "🥐" if categoria == "Hojaldre" else \
-                                    "☕" if categoria == "Bebidas" else "🍪"
-                            
-                            st.markdown(f"**{icono} {producto}**")
-                            st.markdown(f"💵 **Precio:** ${datos['precio']:.2f}")
-                            st.markdown(f"📦 **Stock:** {datos['stock']}")
-                            
+                        # Cambiar color del borde si stock es cero
+                        border_color = "#FF4B4B" if datos['stock'] == 0 else "#E0E0E0"
+                        st.markdown(
+                            f"""<div style='border: 2px solid {border_color}; border-radius: 5px; padding: 10px;'>
+                            <p style='margin-bottom: 5px;'><strong>{'🎂' if categoria == 'Pastelería' else '🥐' if categoria == 'Hojaldre' else '☕' if categoria == 'Bebidas' else '🍪'} {producto}</strong></p>
+                            <p style='margin-bottom: 5px;'>💵 <strong>Precio:</strong> ${datos['precio']:.2f}</p>
+                            <p style='margin-bottom: 10px;'>📦 <strong>Stock:</strong> {datos['stock']}</p>
+                            </div>""", 
+                            unsafe_allow_html=True
+                        )
+                        
+                        # Mostrar mensaje si no hay stock
+                        if datos['stock'] == 0:
+                            st.error("Agotado", icon="⛔")
+                        else:
                             # Botón para agregar con cantidad
                             cantidad = st.number_input(
                                 "Cantidad:",
