@@ -263,68 +263,207 @@ def mostrar_estadisticas():
 
 # --- INTERFAZ DE USUARIO ---
 def mostrar_interfaz_ventas():
-    """Interfaz principal para el proceso de ventas"""
-    st.header("🛒 Punto de Venta")
+    """Interfaz mejorada para el proceso de ventas"""
+    st.header("🛒 Punto de Venta - SweetBakery")
     
-    # Barra de búsqueda
-    busqueda = st.text_input("🔍 Buscar producto por nombre:", "", key="busqueda_venta")
+    # Barra de búsqueda mejorada
+    with st.container():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            busqueda = st.text_input("🔍 Buscar producto:", "", 
+                                   placeholder="Escribe el nombre del producto...",
+                                   help="Busca por nombre de producto")
+        with col2:
+            categoria_filtro = st.selectbox("🗂️ Filtrar por categoría", 
+                                          ["Todas"] + list(st.session_state.inventario.keys()))
     
-    # Mostrar productos según búsqueda
-    if busqueda:
+    # Mostrar productos según búsqueda/filtro
+    if busqueda or categoria_filtro != "Todas":
         resultados = []
         for categoria, productos in st.session_state.inventario.items():
+            if categoria_filtro != "Todas" and categoria != categoria_filtro:
+                continue
+                
             for producto, datos in productos.items():
-                if busqueda.lower() in producto.lower():
+                if not busqueda or busqueda.lower() in producto.lower():
                     resultados.append({
                         "Producto": producto,
                         "Categoría": categoria,
                         "Precio": datos['precio'],
-                        "Stock": datos['stock']
+                        "Stock": datos['stock'],
+                        "Imagen": "🎂" if categoria == "Pastelería" else 
+                                 "🥐" if categoria == "Hojaldre" else
+                                 "☕" if categoria == "Bebidas" else
+                                 "🍪"
                     })
         
         if resultados:
-            st.subheader(f"Resultados para '{busqueda}'")
-            for item in resultados:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"**{item['Producto']}** (${item['Precio']:.2f}) - Stock: {item['Stock']}")
-                with col2:
-                    if st.button(f"Agregar", key=f"add_{item['Producto']}"):
-                        if item['Producto'] in st.session_state.carrito:
-                            st.session_state.carrito[item['Producto']]['cantidad'] += 1
-                        else:
-                            st.session_state.carrito[item['Producto']] = {
-                                'cantidad': 1,
-                                'precio': item['Precio'],
-                                'categoria': item['Categoría'],
-                                'subtotal': item['Precio']
-                            }
-                        st.success(f"¡{item['Producto']} agregado!")
-                        st.rerun()
+            st.subheader(f"📦 Productos Disponibles ({len(resultados)} encontrados)")
+            
+            # Mostrar productos en tarjetas
+            cols = st.columns(4)
+            col_index = 0
+            
+            for idx, item in enumerate(resultados):
+                with cols[col_index]:
+                    with st.container(border=True):
+                        st.markdown(f"**{item['Imagen']} {item['Producto']}**")
+                        st.markdown(f"💵 **Precio:** ${item['Precio']:.2f}")
+                        st.markdown(f"📦 **Stock:** {item['Stock']}")
+                        
+                        # Botón para agregar con cantidad
+                        cantidad = st.number_input(
+                            "Cantidad:",
+                            min_value=1,
+                            max_value=item['Stock'],
+                            value=1,
+                            key=f"cant_{item['Producto']}",
+                            label_visibility="collapsed"
+                        )
+                        
+                        if st.button("➕ Agregar", 
+                                   key=f"add_{item['Producto']}",
+                                   use_container_width=True):
+                            agregar_al_carrito(item['Producto'], cantidad, item['Categoría'])
+                            st.toast(f"✅ {cantidad} x {item['Producto']} agregado!")
+                
+                col_index = (col_index + 1) % 4
+                if col_index == 0 and idx < len(resultados) - 1:
+                    cols = st.columns(4)
         else:
-            st.warning("No se encontraron productos con ese nombre")
+            st.warning("No se encontraron productos con esos criterios")
+            if st.button("Mostrar todos los productos"):
+                st.session_state.busqueda_venta = ""
+                st.rerun()
     else:
-        # Mostrar todas las categorías si no hay búsqueda
+        # Mostrar todas las categorías con expansores si no hay búsqueda
         for categoria, productos in st.session_state.inventario.items():
-            with st.expander(f"📂 {categoria}"):
-                for producto, datos in productos.items():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.write(f"**{producto}** (${datos['precio']:.2f}) - Stock: {datos['stock']}")
-                    with col2:
-                        if st.button(f"Agregar", key=f"add_{categoria}_{producto}"):
-                            if producto in st.session_state.carrito:
-                                st.session_state.carrito[producto]['cantidad'] += 1
-                            else:
-                                st.session_state.carrito[producto] = {
-                                    'cantidad': 1,
-                                    'precio': datos['precio'],
-                                    'categoria': categoria,
-                                    'subtotal': datos['precio']
-                                }
-                            st.success(f"¡{producto} agregado!")
-                            st.rerun()
+            with st.expander(f"📂 {categoria} ({len(productos)} productos)", expanded=True):
+                cols = st.columns(4)
+                col_index = 0
+                
+                for idx, (producto, datos) in enumerate(productos.items()):
+                    with cols[col_index]:
+                        with st.container(border=True):
+                            # Icono según categoría
+                            icono = "🎂" if categoria == "Pastelería" else \
+                                    "🥐" if categoria == "Hojaldre" else \
+                                    "☕" if categoria == "Bebidas" else "🍪"
+                            
+                            st.markdown(f"**{icono} {producto}**")
+                            st.markdown(f"💵 **Precio:** ${datos['precio']:.2f}")
+                            st.markdown(f"📦 **Stock:** {datos['stock']}")
+                            
+                            # Botón para agregar con cantidad
+                            cantidad = st.number_input(
+                                "Cantidad:",
+                                min_value=1,
+                                max_value=datos['stock'],
+                                value=1,
+                                key=f"cant_{categoria}_{producto}",
+                                label_visibility="collapsed"
+                            )
+                            
+                            if st.button("➕ Agregar", 
+                                       key=f"add_{categoria}_{producto}",
+                                       use_container_width=True):
+                                agregar_al_carrito(producto, cantidad, categoria)
+                                st.toast(f"✅ {cantidad} x {producto} agregado!")
+                    
+                    col_index = (col_index + 1) % 4
+                    if col_index == 0 and idx < len(productos) - 1:
+                        cols = st.columns(4)
 
+def mostrar_carrito():
+    """Carrito de compras mejorado"""
+    st.sidebar.header("📋 Factura Actual")
+    
+    if not st.session_state.carrito:
+        st.sidebar.info("🛒 El carrito está vacío")
+        st.sidebar.image("https://cdn-icons-png.flaticon.com/512/2038/2038854.png", 
+                        width=150, caption="Agrega productos para comenzar")
+        return
+    
+    # Mostrar resumen compacto
+    total_items = sum(item['cantidad'] for item in st.session_state.carrito.values())
+    st.sidebar.subheader(f"🛍️ {total_items} {'producto' if total_items == 1 else 'productos'}")
+    
+    # Lista de productos con opciones de edición
+    for producto, item in st.session_state.carrito.items():
+        with st.sidebar.container(border=True):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**{producto}**")
+                st.caption(f"${item['precio']:.2f} c/u")
+            with col2:
+                nueva_cantidad = st.number_input(
+                    "Cantidad",
+                    min_value=1,
+                    max_value=st.session_state.inventario[item['categoria']][producto]['stock'] + item['cantidad'],
+                    value=item['cantidad'],
+                    key=f"side_cant_{producto}",
+                    label_visibility="collapsed"
+                )
+                
+                if nueva_cantidad != item['cantidad']:
+                    item['cantidad'] = nueva_cantidad
+                    item['subtotal'] = nueva_cantidad * item['precio']
+                    st.rerun()
+            
+            if st.button("❌ Eliminar", key=f"side_del_{producto}", use_container_width=True):
+                del st.session_state.carrito[producto]
+                st.rerun()
+    
+    # Resumen de compra
+    st.sidebar.divider()
+    subtotal = sum(item['subtotal'] for item in st.session_state.carrito.values())
+    st.sidebar.markdown(f"**Subtotal:** ${subtotal:.2f}")
+    
+    # Opciones de pago mejoradas
+    with st.sidebar.expander("💳 Información de Pago", expanded=True):
+        cliente = st.text_input("👤 Nombre del cliente:", "Consumidor Final")
+        
+        metodo_pago = st.selectbox(
+            "Método de pago:", 
+            ["Efectivo Bs", "Efectivo $", "Tarjeta Débito", "Tarjeta Crédito", "Pago Móvil", "Zelle"],
+            index=0
+        )
+        
+        if metodo_pago.startswith("Efectivo"):
+            monto_recibido = st.number_input("Monto recibido:", min_value=0.0, value=subtotal, step=1.0)
+            cambio = monto_recibido - subtotal
+            if cambio >= 0:
+                st.markdown(f"**Cambio:** ${cambio:.2f}")
+            else:
+                st.error("El monto recibido es insuficiente")
+    
+    # Botones de acción
+    st.sidebar.divider()
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("🔄 Vaciar Carrito", use_container_width=True, type="secondary"):
+            st.session_state.carrito = {}
+            st.toast("Carrito vaciado")
+            st.rerun()
+    with col2:
+        if st.button("✅ Finalizar Compra", use_container_width=True, type="primary"):
+            venta = finalizar_venta(cliente, metodo_pago)
+            if venta:
+                st.sidebar.success("Venta registrada correctamente!")
+                st.balloons()
+                
+                # Generar y ofrecer descarga de factura
+                pdf_buffer = generar_factura(venta)
+                st.sidebar.download_button(
+                    label="📄 Descargar Factura",
+                    data=pdf_buffer,
+                    file_name=f"factura_{venta['fecha'].strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                
+                st.session_state.carrito = {}
+                st.rerun()
 def mostrar_carrito():
     """Muestra el carrito de compras actual con opciones de edición"""
     st.sidebar.header("📋 Factura Actual")
